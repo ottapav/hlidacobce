@@ -4,6 +4,7 @@ import io
 import json
 import os
 import re
+import threading
 from datetime import date
 
 from . import net
@@ -17,6 +18,7 @@ CSU_YEARS = 5
 MAX_COLS = 14
 CACHE_DIR = os.environ.get("HLIDACOBCE_CACHE", ".hlidacobce_cache")
 SRC = "Český statistický úřad (DataStat)"
+_lock = threading.Lock()
 
 
 def _cache_path(kod, dataset):
@@ -24,6 +26,11 @@ def _cache_path(kod, dataset):
 
 
 def csu_load(kod, dataset=CSU_DATASET):
+    with _lock:  # velký soubor se nesmí stahovat paralelně
+        return _csu_load(kod, dataset)
+
+
+def _csu_load(kod, dataset):
     """Stáhne CSV ČSÚ a uloží jen řádky pro danou obec. Výsledek se cachuje na disk."""
     if not kod:
         raise ValueError("chybí kód obce")

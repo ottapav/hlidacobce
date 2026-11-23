@@ -1,0 +1,1 @@
+# Aplikace nemá žádné závislosti (jen standardní knihovna Pythonu). Soubor tu je, aby hosting poznal Python projekt.

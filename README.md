@@ -23,6 +23,17 @@ python3 -m unittest discover -s tests -t .
 
 Server poslouchá jen na 127.0.0.1. Velké soubory (ČSÚ, rejstřík škol) se ukládají do `.hlidacobce_cache/` (ČSÚ 120 dní, rejstřík 30 dní); smazáním složky vynutíte nové stažení.
 
+## Nasazení na Render
+
+Repozitář obsahuje `render.yaml` (web service, `python app.py`, health check `/healthz`) a nemá žádné závislosti.
+Aplikace sama pozná hosting podle proměnné `PORT`: poslouchá na `0.0.0.0` a neotevírá prohlížeč.
+
+1. V Render dashboardu (Environment) nastavte `HLIDAC_TOKEN`. Bez něj fungují ostatní karty, karty smluv jen vysvětlí, jak token získat.
+2. Volitelně `HLIDACOBCE_DEMO=1` (vymyšlená data), `HLIDACOBCE_RATE_LIMIT` (požadavků/min/IP, výchozí 40), `HLIDACOBCE_MAX_CONCURRENT` (souběžných načtení, výchozí 4).
+3. Cache velkých souborů je v `/tmp`, takže po restartu nebo uspání free instance se ČSÚ a rejstřík škol stahují znovu (první načtení záložky pak trvá déle).
+
+Veřejná instance používá váš token Hlídače státu, proto je zapnutý limit požadavků na IP a adresy webů zadané uživatelem se stahují jen z veřejných IP adres (ochrana před dotazy do vnitřní sítě).
+
 ## Co aplikace záměrně nedělá
 
 Měření dostupnosti webů v čase, upozornění na nové smlouvy od minulého spuštění a cokoli, co vyžaduje opakované volání. Karta „Dostupnost webu“ je jen jednorázové měření.

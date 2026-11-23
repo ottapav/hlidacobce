@@ -6,6 +6,7 @@ Parser je tolerantní (hledá značky podle konce názvu). Když selže, lze šk
 import json
 import os
 import re
+import threading
 import xml.etree.ElementTree as ET
 from datetime import date
 
@@ -15,6 +16,7 @@ from .util import fold, norm_ico
 REJSTRIK_URL = "https://rejstriky.msmt.cz/opendata/vrejcelk.xml"
 CACHE_DIR = os.environ.get("HLIDACOBCE_CACHE", ".hlidacobce_cache")
 INDEX_FILE = "rejstrik_index.json"
+_lock = threading.Lock()
 CACHE_DAYS = 30
 
 
@@ -82,6 +84,11 @@ def parse_rejstrik(stream):
 
 
 def load_index(force=False):
+    with _lock:  # velký soubor se nesmí stahovat paralelně
+        return _load_index(force)
+
+
+def _load_index(force):
     path = os.path.join(CACHE_DIR, INDEX_FILE)
     if not force:
         try:

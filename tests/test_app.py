@@ -137,3 +137,28 @@ class TestServer(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestHosted(unittest.TestCase):
+    def test_rate_limit(self):
+        server._hits.clear()
+        ok = [server.rate_limited("1.2.3.4", now=100.0 + i * 0.1) for i in range(server.RATE_LIMIT + 3)]
+        self.assertEqual(ok[:server.RATE_LIMIT], [False] * server.RATE_LIMIT)
+        self.assertTrue(all(ok[server.RATE_LIMIT:]))
+        self.assertFalse(server.rate_limited("1.2.3.4", now=200.0))  # po minutě znovu povoleno
+        self.assertFalse(server.rate_limited("5.6.7.8", now=100.5))
+
+    def test_public_bind_healthz_and_host(self):
+        net.set_demo(True)
+        srv = server.make_server(0, "0.0.0.0")
+        port = srv.server_address[1]
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            for path, host in (("/healthz", "hlidacobce.onrender.com"), ("/api/status", "hlidacobce.onrender.com")):
+                req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", headers={"Host": host})
+                with urllib.request.urlopen(req) as r:
+                    self.assertEqual(r.status, 200)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            net.set_demo(False)

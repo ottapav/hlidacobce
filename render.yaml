@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: hlidacobce
+    runtime: python
+    plan: free
+    buildCommand: "echo no dependencies"
+    startCommand: "python app.py"
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: HLIDAC_TOKEN
+        sync: false        # nastavte v Render dashboardu (Environment)
+      - key: HLIDACOBCE_CACHE
+        value: /tmp/hlidacobce_cache
