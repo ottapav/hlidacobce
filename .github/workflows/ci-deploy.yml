@@ -1,0 +1,30 @@
+name: CI a nasazení na Render
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s tests -t .
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Spustit nasazení na Renderu (deploy hook)
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "Secret RENDER_DEPLOY_HOOK není nastaven, krok se přeskakuje."
+            exit 0
+          fi
+          curl -fsS -X POST "$HOOK"
