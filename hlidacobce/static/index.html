@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hlídač obce</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <h1>Hlídač obce</h1>
+  <p class="sub">Přehled veřejných zdrojů o obci, škole a školce. Data se načtou jednorázově, až když o ně požádáte.</p>
+  <p id="demo" class="demo" hidden>Režim DEMO – všechna data jsou vymyšlená.</p>
+</header>
+
+<main>
+  <section id="step-search" aria-labelledby="q-label">
+    <form id="search-form" class="panel">
+      <label id="q-label" for="q">Jak se jmenuje obec? (nebo IČO)</label>
+      <div class="row">
+        <input id="q" name="q" type="text" autocomplete="off" autofocus placeholder="např. Velim" minlength="2" required>
+        <button type="submit">Hledat</button>
+      </div>
+    </form>
+    <p id="search-msg" class="msg" role="status"></p>
+    <ul id="results" class="results"></ul>
+  </section>
+
+  <section id="step-main" hidden>
+    <div class="who">
+      <div><strong id="obec-name"></strong><br><span id="obec-ico" class="muted"></span></div>
+      <button type="button" id="change" class="ghost">Změnit obec</button>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Záložky">
+      <button role="tab" id="t-obec" aria-controls="p-obec" aria-selected="true" data-tab="obec">Obec</button>
+      <button role="tab" id="t-zs" aria-controls="p-zs" aria-selected="false" data-tab="zs" tabindex="-1">Škola</button>
+      <button role="tab" id="t-ms" aria-controls="p-ms" aria-selected="false" data-tab="ms" tabindex="-1">Školka</button>
+      <button role="tab" id="t-csu" aria-controls="p-csu" aria-selected="false" data-tab="csu" tabindex="-1">ČSÚ</button>
+    </div>
+
+    <div role="tabpanel" id="p-obec" aria-labelledby="t-obec" class="tabpanel">
+      <form class="panel inline" data-web-form="obec">
+        <label for="web-obec">Web obce (volitelné – ke kontrole povinných informací)</label>
+        <div class="row"><input id="web-obec" type="text" placeholder="www.obec.cz"><button type="submit">Zkontrolovat web</button></div>
+      </form>
+      <div class="cards" id="c-obec"></div>
+    </div>
+
+    <div role="tabpanel" id="p-zs" aria-labelledby="t-zs" class="tabpanel" hidden>
+      <div class="panel school-picker" data-kind="zs"></div>
+      <div class="cards" id="c-zs"></div>
+    </div>
+
+    <div role="tabpanel" id="p-ms" aria-labelledby="t-ms" class="tabpanel" hidden>
+      <div class="panel school-picker" data-kind="ms"></div>
+      <div class="cards" id="c-ms"></div>
+    </div>
+
+    <div role="tabpanel" id="p-csu" aria-labelledby="t-csu" class="tabpanel" hidden>
+      <div class="cards" id="c-csu"></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <p>Výsledky jsou signály ke kontrole, ne důkazy pochybení. Právní opory jsou orientační; nejde o právní poradenství.</p>
+</footer>
+<script src="/static/app.js"></script>
+</body>
+</html>
