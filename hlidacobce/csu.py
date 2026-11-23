@@ -1,6 +1,8 @@
 """Český statistický úřad – otevřená data (DataStat), úroveň obcí. EXPERIMENTÁLNÍ: struktura CSV nebyla ověřena naživo.
 
-Rychlost: velký CSV soubor se stáhne a projde JEDNOU (komprimovaný přenos, streamování) do lokálního indexu SQLite
+Rychlá cesta: DataStat API (výběr jedné obce, JSON-stat) – dotaz na jednu obec je v řádu sekund. Struktura sady OBY02E
+(kódy dimenzí, verze, ukazatel 2406P) je převzata z oficiálního katalogu; formát odpovědi na dotaz nebyl ověřen naživo.
+Záloha: velký CSV soubor se stáhne a projde JEDNOU (komprimovaný přenos, streamování) do lokálního indexu SQLite
 pro všechny obce. Dotaz na konkrétní obec je pak okamžitý. Příprava indexu běží na pozadí (spouští se při startu
 serveru), karta mezitím ukáže, že se data připravují, a klient ji po chvíli načte znovu.
 """
@@ -24,6 +26,11 @@ CSU_CACHE_DAYS = 120
 CSU_YEARS = 5
 MAX_COLS = 14
 RETRY_AFTER_ERROR_S = 120
+API = "https://data.csu.gov.cz/api"
+USE_API = True
+# Kódy z katalogu sady OBY02E (verze 4); za běhu se zkusí zjistit znovu, tohle jsou výchozí hodnoty.
+API_DEFAULTS = {"verze": "4", "indicator": "2406P", "territory": "UZ5ALLOKR", "time": "CasRB", "sex": "POHL2", "age": "VekSkupZakl"}
+API_TYPES = {"territory": "VUZEMI", "time": "REF_CAS", "sex": "POHLAVI", "age": "VEK"}
 CACHE_DIR = os.environ.get("HLIDACOBCE_CACHE", ".hlidacobce_cache")
 SRC = "Český statistický úřad (DataStat)"
 
@@ -139,17 +146,12 @@ def ensure_index(dataset=CSU_DATASET, wait=False):
 
 
 def warm_up(dataset=CSU_DATASET):
-    """Při startu serveru spustí přípravu indexu na pozadí (v demo režimu nic)."""
-    if net.DEMO:
-        return
-    try:
-        ensure_index(dataset)
-    except net.ApiError:
-        pass
+    """Dnes nic: velký soubor se stahuje jen jako záloha, když selže API (viz csu_load)."""
+    return None
 
 
-def csu_load(kod, dataset=CSU_DATASET):
-    """Řádky pro danou obec z lokálního indexu. Vyvolá Preparing, dokud se index připravuje."""
+def load_bulk(kod, dataset=CSU_DATASET):
+    """Záloha: řádky pro danou obec z lokálního indexu celého souboru. Vyvolá Preparing, dokud se index připravuje."""
     if not kod:
         raise ValueError("chybí kód obce")
     ensure_index(dataset, wait=net.DEMO)
@@ -164,6 +166,128 @@ def csu_load(kod, dataset=CSU_DATASET):
         db.close()
     meta["rows"] = rows
     return meta
+
+
+# ------------------------------------------------------------------ DataStat API (rychlá cesta)
+def discover(dataset=CSU_DATASET):
+    """Z katalogu zjistí verzi sady a kódy dimenzí; při selhání vrací výchozí hodnoty."""
+    d = dict(API_DEFAULTS)
+    try:
+        cat = net.http_json(f"{API}/katalog/v1/sady/{dataset}", retries=1, timeout=20)
+        d["verze"] = str(cat.get("verze") or d["verze"])
+        variants = cat.get("variantyDimenze") or []
+        for key, typ in API_TYPES.items():
+            vs = [v for v in variants if v.get("typDimenzeKod") == typ]
+            if key == "territory":  # varianta jen s úrovní OBEC a nejvíce položkami
+                vs = [v for v in vs if {u.get("kodUrovne") for u in v.get("urovneDimenze", [])} == {"OBEC"}]
+                vs.sort(key=lambda v: -sum(u.get("pocetPolozek", 0) for u in v.get("urovneDimenze", [])))
+            if vs:
+                d[key] = vs[0]["kod"]
+        ind = [i for i in cat.get("ukazatele") or [] if "1. 1." in str(i.get("nazev", ""))]
+        if ind:
+            d["indicator"] = ind[0]["kod"]
+    except (net.ApiError, KeyError, TypeError, ValueError, AttributeError):
+        pass
+    return d
+
+
+def _query_body(cfg, kod, dim_names):
+    return {"sloupce": [{"kodDimenze": "IndicatorType", "filtr": [{"zobrazitPolozky": [cfg["indicator"]]}]},
+                        {"kodDimenze": dim_names["sex"], "filtr": []}, {"kodDimenze": dim_names["age"], "filtr": []}],
+            "radky": [{"kodDimenze": dim_names["territory"], "filtr": [{"zobrazitPolozky": [str(kod)]}]},
+                      {"kodDimenze": dim_names["time"], "filtr": []}],
+            "filtryTabulky": []}
+
+
+def parse_jsonstat(d):
+    """JSON-stat 2.0 -> řádky {year, dims, value}. Dimenze s jednou položkou (obec, ukazatel) se vynechají."""
+    ids, sizes = d["id"], d["size"]
+    dims = d["dimension"]
+    cats = []
+    for i in ids:
+        c = dims[i]["category"]
+        idx = c.get("index")
+        codes = list(idx) if isinstance(idx, list) else [k for k, _ in sorted((idx or {}).items(), key=lambda kv: kv[1])]
+        if not codes:
+            codes = list((c.get("label") or {}).keys())
+        labels = c.get("label") or {}
+        cats.append([str(labels.get(k, k)) for k in codes])
+    time_ids = (d.get("role") or {}).get("time") or []
+    time_dim = next((n for n, i in enumerate(ids) if i in time_ids),
+                    next((n for n, i in enumerate(ids) if re.search(r"cas|rok|year|time", i, re.I)), None))
+    if time_dim is None:
+        raise ValueError("v odpovědi chybí časová dimenze")
+    vals = d["value"]
+    if isinstance(vals, dict):
+        get = lambda n: vals.get(str(n))  # noqa: E731
+    else:
+        get = lambda n: vals[n] if n < len(vals) else None  # noqa: E731
+    rows, strides = [], []
+    acc = 1
+    for sz in reversed(sizes):
+        strides.append(acc)
+        acc *= sz
+    strides.reverse()
+    total = acc
+    for n in range(total):
+        v = get(n)
+        if v is None:
+            continue
+        pos = [(n // strides[k]) % sizes[k] for k in range(len(sizes))]
+        rows.append({"year": cats[time_dim][pos[time_dim]],
+                     "dims": [cats[k][pos[k]] for k in range(len(sizes)) if k != time_dim and sizes[k] > 1],
+                     "value": str(v)})
+    return rows
+
+
+def _api_cache_path(kod):
+    return os.path.join(CACHE_DIR, f"csu_api_{re.sub(r'[^0-9A-Za-z]', '', str(kod))}.json")
+
+
+def load_api(kod, dataset=CSU_DATASET):
+    """Data jedné obce přímo z DataStat API (JSON-stat). Výsledek se cachuje na disk."""
+    path = _api_cache_path(kod)
+    try:
+        with open(path, encoding="utf-8") as f:
+            cached = json.load(f)
+        if (date.today() - date.fromisoformat(cached["fetched"])).days <= CSU_CACHE_DAYS:
+            return cached
+    except (OSError, ValueError, KeyError, json.JSONDecodeError):
+        pass
+    cfg = discover(dataset)
+    url = f"{API}/dotaz/v1/data/sady/{dataset}/vlastni?verzeSady={cfg['verze']}&format=JSON_STAT"
+    last = None
+    # první pokus s kódy variant dimenzí, druhý s obecnými typy dimenzí (dokumentace kód dimenze přesně nespecifikuje)
+    for names in (cfg, {k: API_TYPES[k] for k in API_TYPES}):
+        try:
+            data = net.http_json(url, data=_query_body(cfg, kod, names), retries=1, timeout=30)
+            rows = parse_jsonstat(data)
+            if rows:
+                info = {"fetched": date.today().isoformat(), "url": url, "via": "api", "header": [],
+                        "territory_columns": [], "other_columns": [], "rows": rows}
+                try:
+                    os.makedirs(CACHE_DIR, exist_ok=True)
+                    with open(path, "w", encoding="utf-8") as f:
+                        json.dump(info, f, ensure_ascii=False)
+                except OSError:
+                    pass
+                return info
+            last = ValueError("API vrátilo prázdný výsledek")
+        except (net.ApiError, KeyError, TypeError, ValueError, IndexError) as ex:
+            last = ex
+    raise net.ApiError(f"DataStat API nevrátilo použitelná data ({last})")
+
+
+def csu_load(kod, dataset=CSU_DATASET):
+    """Nejdřív rychlé API; když selže, záložní cesta přes celý soubor (může vyvolat Preparing)."""
+    if not kod:
+        raise ValueError("chybí kód obce")
+    if USE_API:
+        try:
+            return load_api(kod, dataset)
+        except net.ApiError:
+            pass
+    return load_bulk(kod, dataset)
 
 
 def fmt_num(s):

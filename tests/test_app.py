@@ -46,13 +46,37 @@ class TestModules(Base):
             os.environ["HLIDAC_TOKEN"] = old
 
     def test_csu_index(self):
-        self.assertTrue(os.path.exists(csu._db_path(csu.CSU_DATASET)) or csu.csu_load(demo.KOD_OBCE))
-        self.assertEqual(len(csu.csu_load(demo.KOD_OBCE)["rows"]), 30)
-        self.assertEqual(csu.csu_load("111111")["rows"][0]["value"], "7")  # řádky jiných obcí jsou v indexu také
-        self.assertEqual(csu.csu_load("424242")["rows"], [])
+        self.assertEqual(len(csu.load_bulk(demo.KOD_OBCE)["rows"]), 30)
+        self.assertEqual(csu.load_bulk("111111")["rows"][0]["value"], "7")  # řádky jiných obcí jsou v indexu také
+        self.assertEqual(csu.load_bulk("424242")["rows"], [])
+
+    def test_csu_api(self):
+        info = csu.csu_load(demo.KOD_OBCE)
+        self.assertEqual(info["via"], "api")
+        self.assertEqual(len(info["rows"]), 60)
+        self.assertEqual(info["rows"][0]["dims"], ["Total", "Total"])
+        self.assertEqual(csu.discover()["territory"], "UZ5ALLOKR")  # varianta jen s obcemi, ne pražská
+        body = csu._query_body(csu.API_DEFAULTS, "538043", csu.API_DEFAULTS)
+        self.assertEqual(body["radky"][0]["filtr"][0]["zobrazitPolozky"], ["538043"])
+        card = csu.population_card(demo.KOD_OBCE)
+        self.assertEqual(card["status"], "info")
+        self.assertEqual(len(card["blocks"][0]["rows"]), 5)
+        self.assertEqual(len(card["blocks"][0]["headers"]), 13)  # rok + 3 pohlaví x 4 věkové skupiny
+
+    def test_csu_api_failure_falls_back_to_bulk(self):
+        c = csu.population_card("111111")  # API pro tuto obec vrací 404 -> záložní soubor
+        self.assertEqual(c["status"], "info")
+        self.assertEqual(c["blocks"][0]["rows"][0][1]["text"], "7")
+
+    def test_jsonstat_dict_values(self):
+        d = {"id": ["T", "S"], "size": [2, 2], "role": {"time": ["T"]},
+             "dimension": {"T": {"category": {"index": {"2023": 0, "2024": 1}}}, "S": {"category": {"index": ["a", "b"], "label": {"a": "A", "b": "B"}}}},
+             "value": {"0": 1, "3": 4}}
+        self.assertEqual(csu.parse_jsonstat(d), [{"year": "2023", "dims": ["A"], "value": "1"}, {"year": "2024", "dims": ["B"], "value": "4"}])
 
     def test_csu_preparing(self):
         net.set_demo(False)
+        csu.USE_API = False
         try:
             with csu._lock:
                 old = dict(csu.STATE)
@@ -67,6 +91,7 @@ class TestModules(Base):
                 with csu._lock:
                     csu.STATE.update(old)
         finally:
+            csu.USE_API = True
             net.set_demo(True)
 
     def test_csu(self):

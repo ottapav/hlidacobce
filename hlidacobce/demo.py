@@ -39,6 +39,29 @@ def fake_json(url, data):
         if ico in allv:
             return allv[ico]
         return _subject(ico, f"Firma {ico}", "112", "2005-05-05")
+    if "data.csu.gov.cz" in path.netloc:
+        if "/katalog/v1/sady/" in path.path:
+            return {"kod": "OBY02E", "verze": "4", "ukazatele": [{"kod": "2406P", "nazev": "Population as at 1. 1. (start-period population)"}],
+                    "variantyDimenze": [
+                        {"kod": "UZ5ALLOKR", "typDimenzeKod": "VUZEMI", "urovneDimenze": [{"kodUrovne": "OBEC", "pocetPolozek": 6271}]},
+                        {"kod": "UZ596H", "typDimenzeKod": "VUZEMI", "urovneDimenze": [{"kodUrovne": "OBEC", "pocetPolozek": 1}, {"kodUrovne": "MOMC", "pocetPolozek": 57}]},
+                        {"kod": "CasRB", "typDimenzeKod": "REF_CAS"}, {"kod": "POHL2", "typDimenzeKod": "POHLAVI"},
+                        {"kod": "VekSkupZakl", "typDimenzeKod": "VEK"}]}
+        if path.path.endswith("/vlastni"):
+            kod = data["radky"][0]["filtr"][0]["zobrazitPolozky"][0]
+            if kod != KOD_OBCE:
+                raise_ = __import__("hlidacobce.net", fromlist=["ApiError"]).ApiError("HTTP 404", 404)
+                raise raise_
+            sexes, ages, years = ["Total", "Male", "Female"], ["Total", "0–14", "15–64", "65+"], [str(y) for y in range(2020, 2025)]
+            return {"version": "2.0", "class": "dataset", "id": ["IndicatorType", "POHL2", "VekSkupZakl", "UZ5ALLOKR", "CasRB"],
+                    "size": [1, 3, 4, 1, 5], "role": {"time": ["CasRB"]},
+                    "dimension": {
+                        "IndicatorType": {"category": {"index": ["2406P"], "label": {"2406P": "Population as at 1. 1."}}},
+                        "POHL2": {"category": {"index": {"0": 0, "1": 1, "2": 2}, "label": {"0": sexes[0], "1": sexes[1], "2": sexes[2]}}},
+                        "VekSkupZakl": {"category": {"index": ["VEKC", "A", "B", "C"], "label": dict(zip(["VEKC", "A", "B", "C"], ages))}},
+                        "UZ5ALLOKR": {"category": {"index": [KOD_OBCE], "label": {KOD_OBCE: "Ukázkov"}}},
+                        "CasRB": {"category": {"index": years, "label": {y: y for y in years}}}},
+                    "value": [1000 + 10 * i + (i % 7) for i in range(60)]}
     if "hlidacstatu.cz" in path.netloc:
         q = urllib.parse.parse_qs(path.query)
         page = int(q.get("strana", ["1"])[0])
