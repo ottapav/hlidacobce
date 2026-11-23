@@ -66,6 +66,7 @@ class _Page(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.parts, self.links, self.title, self._skip, self._in_title, self._href, self._atxt = [], [], "", 0, False, None, []
+        self.link_prev, self._prev = [], ""  # text těsně před každým odkazem (paralelně k self.links)
 
     def handle_starttag(self, tag, attrs):
         if tag in ("script", "style", "noscript"):
@@ -74,6 +75,7 @@ class _Page(HTMLParser):
             self._in_title = True
         elif tag == "a":
             self._href, self._atxt = dict(attrs).get("href"), []
+            self._prev = self.parts[-1] if self.parts else ""
 
     def handle_endtag(self, tag):
         if tag in ("script", "style", "noscript") and self._skip:
@@ -82,6 +84,7 @@ class _Page(HTMLParser):
             self._in_title = False
         elif tag == "a" and self._href is not None:
             self.links.append((self._href, " ".join(self._atxt).strip()))
+            self.link_prev.append(self._prev)
             self._href = None
 
     def handle_data(self, data):
@@ -105,34 +108,72 @@ def parse_html(html):
     return p
 
 
-def find_site(ico):
-    """Adresa webu subjektu ze stránky subjektu na Hlídači státu (sekce Odkazy, „Webová stránka“). Vrací URL nebo None.
-    Struktura stránky byla ověřena jen na jednom subjektu; proto se zkouší popisek odkazu, pak odkaz podobný adrese, pak první vhodný."""
+LABEL = re.compile(r"webov\w* stran|oficialni web|internetov\w* stran|^web:?$|^www:?$")
+GENERIC = {"obec", "mesto", "mestys", "statutarni", "zakladni", "skola", "materska", "prispevkova", "organizace", "okres", "a", "s", "r", "o", "p",
+           "ms", "zs", "skolka", "ceska", "republika", "praha"}
+
+
+def name_tokens(name):
+    """Rozlišující slova z názvu subjektu (bez obecných slov a bez okresu): podle nich se ověřuje, že web patří subjektu."""
+    words = re.findall(r"[a-z0-9]+", fold(re.split(r",?\s*okres\b", str(name or ""), flags=re.I)[0]))
+    return [w for w in words if w not in GENERIC and len(w) >= 4]
+
+
+def find_site(ico, name):
+    """Spolehlivě zjistí web subjektu, nebo řekne, proč ne. Vrací dict {status, url, candidate, reason}.
+
+    Web se přijme jen když (1) ho Hlídač státu uvádí s popiskem „Webová stránka“ (ne jakýkoli odkaz na stránce, ty bývají reklamy,
+    sociální sítě apod.), (2) je takový odkaz právě jeden a (3) úvodní stránka webu obsahuje rozlišující slovo z názvu subjektu
+    (nebo jeho IČO). Jinak se web nepřiřadí a uživatel dostane vysvětlení."""
     _, html = net.fetch_page(HLIDAC_SUBJEKT.format(ico=ico))
+    page = parse_html(html)
     cands = []
-    for href, label in parse_html(html).links:
+    for (href, label), prev in zip(page.links, page.link_prev):
         if not re.match(r"^https?://", href or "", re.I):
             continue
         host = (urllib.parse.urlparse(href).hostname or "").lower()
-        if host and not NOT_SITE.search(host):
-            cands.append((href, fold(label)))
-    for pred in (lambda l: "webova stranka" in l or l in ("web", "www"),
-                 lambda l: l.startswith(("http", "www.")) or "." in l.replace(" ", "")[:60] and " " not in l.strip(),
-                 lambda l: True):
-        for href, label in cands:
-            if pred(label):
-                return href
-    return None
-
-
-def web_cards_for_ico(ico, kind):
-    """Karty kontroly webu; adresu webu najde sama podle IČO."""
+        if not host or NOT_SITE.search(host):
+            continue
+        if LABEL.search(fold(prev)) or LABEL.search(fold(label)):
+            cands.append(href)
+    hosts = {(urllib.parse.urlparse(u).hostname or "").lower().removeprefix("www.") for u in cands}
+    if not cands:
+        return {"status": "none", "url": None, "candidate": None, "reason": "Hlídač státu u subjektu neuvádí odkaz s popiskem „Webová stránka“."}
+    if len(hosts) > 1:
+        return {"status": "ambiguous", "url": None, "candidate": None,
+                "reason": "Hlídač státu uvádí více různých webových stránek: " + ", ".join(sorted(hosts)) + "."}
+    cand = cands[0]
     try:
-        url = find_site(ico)
+        final, home = net.fetch_page(cand)
     except (net.ApiError, ValueError) as ex:
-        return [card("Web a povinně zveřejňované informace", SRC, "error", today_str(),
-                     f"Adresu webu se nepodařilo zjistit (Hlídač státu: {ex}).")]
-    return web_cards(url, kind)
+        return {"status": "unreachable", "url": cand, "candidate": cand, "reason": f"Web uvedený na Hlídači státu se nepodařilo otevřít ({ex})."}
+    p = parse_html(home)
+    hay = fold(f"{final} {p.title} {' '.join(p.parts)}")
+    tokens = name_tokens(name)
+    if any(t in hay for t in tokens) or (norm_ico_in(hay, ico)):
+        return {"status": "ok", "url": final, "candidate": cand, "reason": ""}
+    why = (f"obsah úvodní stránky neodpovídá názvu „{name}“" if tokens else "z názvu nelze odvodit rozlišující slovo a IČO na stránce není")
+    return {"status": "mismatch", "url": None, "candidate": cand, "reason": f"Hlídač státu uvádí web {cand}, ale {why}."}
+
+
+def norm_ico_in(hay, ico):
+    return bool(re.search(r"(?<!\d)" + re.escape(str(ico).lstrip("0")) + r"(?!\d)", hay))
+
+
+def web_cards_for_ico(ico, kind, name=""):
+    """Karty kontroly webu. Adresu webu najde sama; když si není jistá, napíše to a web nekontroluje."""
+    title = "Web a povinně zveřejňované informace"
+    try:
+        r = find_site(ico, name)
+    except (net.ApiError, ValueError) as ex:
+        return [card(title, SRC, "error", today_str(), f"Web se nepodařilo dohledat (Hlídač státu: {ex}).")]
+    if r["status"] == "unreachable":
+        return [card("Dostupnost webu (jednorázové měření)", SRC, "error", today_str(), r["reason"], [], [("Adresa z Hlídače státu", r["url"])])]
+    if r["status"] != "ok":
+        links = [("Adresa z Hlídače státu (neověřená)", r["candidate"])] if r["candidate"] else []
+        return [card(title, SRC, "warn", today_str(), "Web se nepodařilo spolehlivě dohledat, proto ho nekontroluji. " + r["reason"], [], links,
+                     ["Raději nic než špatný web: kontrola se spustí, jen když je adresa potvrzená popiskem v registru a obsahem stránky."])]
+    return web_cards(r["url"], kind)
 
 
 def normalize_url(u):

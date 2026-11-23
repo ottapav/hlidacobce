@@ -158,10 +158,15 @@ def fake_page(url):
         if ms and ms.group(1) in WEBS:
             body = ('<div class="odkazy"><span>Webová stránka</span> '
                     f'<a href="{WEBS[ms.group(1)]}">{WEBS[ms.group(1)]}</a> '
-                    '<a href="https://www.youtube.com/playlist?list=x">Záznamy zastupitelstva</a></div>')
+                    '<a href="https://www.youtube.com/playlist?list=x">Záznamy zastupitelstva</a> '
+                    '<a href="https://www.saleskit.com/cs">Vyzkoušejte SalesKit</a></div>')
             return url, _html("Subjekt", body)
-        if ms:
-            return url, _html("Subjekt", '<a href="https://www.youtube.com/watch?v=1">video</a>')
+        if ms and ms.group(1) == "70000005":  # popisek je, ale web patří jinému subjektu
+            return url, _html("Subjekt", '<span>Webová stránka</span> <a href="https://other.demo/">https://other.demo/</a>')
+        if ms and ms.group(1) == "70000006":  # dva různé weby
+            return url, _html("Subjekt", '<span>Webová stránka</span> <a href="https://a.demo/">a</a> <span>Webová stránka</span> <a href="https://b.demo/">b</a>')
+        if ms:  # jen reklama a odkaz bez popisku
+            return url, _html("Subjekt", '<a href="https://www.saleskit.com/cs">SalesKit</a> <span>Zdroj</span> <a href="https://random.demo/">odkaz</a>')
         m = re.fullmatch(r"/subjekt/Vazby/(\d{8})", path)
         if m and m.group(1) == OBEC_ICO:
             body = ('<h2>Podřízené organizace</h2>'
@@ -184,6 +189,10 @@ def fake_page(url):
             "/kontakt": _html("Kontakt", "<p>Pověřenec pro ochranu osobních údajů: kontakt na GDPR pověřence.</p>", nav),
             "/informace": _html("Informace", "<p>Žádost o informace podle zákona 106/1999 Sb. – poskytování informací.</p>", nav),
         }
+    elif host == "other.demo":
+        pages = {"/": _html("Jiná firma s.r.o.", "<h1>Něco úplně jiného</h1>")}
+    elif host in ("a.demo", "b.demo"):
+        pages = {"/": _html("Ukázkov", "<p>Ukázkov</p>")}
     elif host == "obec.demo":
         nav = [("/uredni-deska", "Úřední deska"), ("/rozpocet", "Rozpočet a závěrečný účet")]
         pages = {

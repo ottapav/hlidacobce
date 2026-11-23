@@ -183,13 +183,22 @@ class TestModules(Base):
         self.assertEqual(found["Prohlášení o přístupnosti webu"], "nenalezeno")
         self.assertEqual(check["status"], "warn")
 
-    def test_find_site_from_hlidac(self):
-        self.assertEqual(webcheck.find_site(demo.OBEC_ICO), "https://obec.demo/")
-        self.assertEqual(webcheck.find_site(demo.SKOLA_ICO), "https://skola.demo")  # YouTube odkaz se ignoruje
-        self.assertIsNone(webcheck.find_site("70000003"))
+    def test_find_site_reliable(self):
+        r = webcheck.find_site(demo.OBEC_ICO, "Obec Ukázkov")
+        self.assertEqual((r["status"], r["url"]), ("ok", "https://obec.demo/"))  # reklama SalesKit a YouTube se ignorují
+        self.assertEqual(webcheck.find_site(demo.SKOLA_ICO, "Základní škola a mateřská škola Ukázkov, příspěvková organizace")["status"], "ok")
+        self.assertEqual(webcheck.find_site("70000003", "Mateřská škola Pohádka")["status"], "none")  # jen reklama a odkaz bez popisku
+        r = webcheck.find_site("70000005", "Mateřská škola Ukázkov")
+        self.assertEqual((r["status"], r["url"], r["candidate"]), ("mismatch", None, "https://other.demo/"))
+        self.assertEqual(webcheck.find_site("70000006", "Mateřská škola Ukázkov")["status"], "ambiguous")
+
+    def test_name_tokens(self):
+        self.assertEqual(webcheck.name_tokens("Obec Velim"), ["velim"])
+        self.assertEqual(webcheck.name_tokens("Masarykova základní škola Velký Osek, okres Kolín"), ["masarykova", "velky", "osek"])
+        self.assertEqual(webcheck.name_tokens("Základní škola a mateřská škola, příspěvková organizace"), [])
 
     def test_web_cards_found_automatically(self):
-        cs = webcheck.web_cards_for_ico(demo.SKOLA_ICO, "zs")
+        cs = webcheck.web_cards_for_ico(demo.SKOLA_ICO, "zs", "Základní škola Ukázkov")
         self.assertEqual([c["title"] for c in cs][0], "Dostupnost webu (jednorázové měření)")
         self.assertIn("https://skola.demo", cs[0]["intro"])
         obec = tabs.tab_obec(demo.OBEC_ICO)["cards"]
@@ -198,9 +207,11 @@ class TestModules(Base):
         self.assertEqual((found["Úřední deska"], found["Rozpočet obce"]), ("nalezeno", "nalezeno"))
 
     def test_web_not_in_hlidac(self):
-        cs = webcheck.web_cards_for_ico("70000003", "ms")
-        self.assertEqual((len(cs), cs[0]["status"]), (1, "warn"))
-        self.assertNotIn("pole", cs[0]["intro"])  # žádná výzva k ručnímu zadání
+        for ico in ("70000003", "70000005", "70000006"):
+            cs = webcheck.web_cards_for_ico(ico, "ms", "Mateřská škola Ukázkov")
+            self.assertEqual((len(cs), cs[0]["status"]), (1, "warn"), ico)
+            self.assertIn("nepodařilo spolehlivě dohledat", cs[0]["intro"])
+            self.assertNotIn("saleskit", json.dumps(cs))
 
     def test_webcheck_errors(self):
         self.assertEqual(webcheck.web_cards("neexistuje.demo", "ms")[0]["status"], "error")

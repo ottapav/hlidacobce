@@ -27,13 +27,15 @@ def search_obce(q):
 
 def tab_obec(ico):
     ico = norm_ico(ico)
-    out = []
+    out, name = [], ""
     try:
-        out.append(identity_card(ares.basic(ico)))
+        b = ares.basic(ico)
+        name = b["name"]
+        out.append(identity_card(b))
     except net.ApiError as ex:
         out.append(_err("Základní údaje (ARES)", "ARES", ex))
     out += contracts.contract_cards(ico, months=12, note=contracts.OBEC_NOTE)
-    out += webcheck.web_cards_for_ico(ico, "obec")
+    out += webcheck.web_cards_for_ico(ico, "obec", name)
     out += sources.obec_link_cards(ico)
     return {"cards": out}
 
@@ -61,13 +63,14 @@ def tab_school(kind, ico):
     if kind not in KIND_LABEL:
         return {"cards": [card("Chyba", "aplikace", "error", None, "Neznámý druh zařízení.")]}
     ico = norm_ico(ico)
-    out = []
+    out, name = [], ""
     try:
         b = ares.basic(ico)
+        name = b["name"]
         out.append(identity_card(b, f"{KIND_LABEL[kind]} – základní údaje (ARES)"))
     except net.ApiError as ex:
         out.append(_err("Základní údaje (ARES)", "ARES", ex))
-    out += webcheck.web_cards_for_ico(ico, kind)
+    out += webcheck.web_cards_for_ico(ico, kind, name)
     out += contracts.contract_cards(ico, months=12, compact=True, note=contracts.SCHOOL_NOTE)
     out += sources.school_link_cards(kind)
     return {"cards": out}
