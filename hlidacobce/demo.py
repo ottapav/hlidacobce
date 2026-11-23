@@ -111,7 +111,8 @@ def _school_contracts():
 CSV = ("hodnota,pohlavi_txt,vek_txt,rok,uzemi_kod,uzemi_txt\n" +
        "".join(f"{v + (y - 2020) * 5},{p},{a},{y},{KOD_OBCE},Ukázkov\n"
                for y in range(2020, 2025) for p, base in (("muži", 0), ("ženy", 12)) for a, v in (("0–14", 310 - base), ("15–64", 1480 - base), ("65+", 520 + base))) +
-       "7,muži,0–14,2024,111111,Jinde\n")
+       "7,muži,0–14,2024,111111,Jinde\n"
+       f",muži,0–14,2024,{KOD_OBCE},Ukázkov\n")  # prázdná hodnota se nesmí zobrazit
 
 XML = f"""<?xml version="1.0" encoding="utf-8"?>
 <VREJ>

@@ -120,7 +120,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _api(self, route, q):
         if route == "status":
-            return self._json({"version": __version__, "demo": net.DEMO, "token": bool(contracts.token())})
+            return self._json({"version": __version__, "commit": os.environ.get("RENDER_GIT_COMMIT", "")[:7], "demo": net.DEMO,
+                               "token": bool(contracts.token())})
         if route == "obce":
             term = q.get("q", "").strip()
             if len(term) < 2:

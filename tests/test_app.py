@@ -50,6 +50,30 @@ class TestModules(Base):
         self.assertEqual(csu.load_bulk("111111")["rows"][0]["value"], "7")  # řádky jiných obcí jsou v indexu také
         self.assertEqual(csu.load_bulk("424242")["rows"], [])
 
+    def test_csu_bulk_real_layout(self):
+        import io
+        lines = ["Ukazatel,IndicatorType,Pohlaví,POHL2,Roky,CasRB,Území,Uz5ALLOKR,Hodnota"]
+        for y in range(2018, 2025):
+            for ind, code in (("Počet obyvatel k 1. 1.", "2406P"), ("Střední stav", "9379")):
+                for sex, sc in (("Muži", "1"), ("Ženy", "2")):
+                    val = str(1000 + y - 2018) if code == "2406P" else ""  # střední stav na úrovni obcí neexistuje
+                    lines.append(f"{ind},{code},{sex},{sc},{y},{y},Ukázkov,424242,{val}")
+        data = ("\n".join(lines) + "\n").encode()
+        orig, db = net.open_stream, csu._db_path(csu.CSU_DATASET)
+        net.open_stream = lambda url, timeout=180: io.BytesIO(data)
+        os.rename(db, db + ".bak")
+        try:
+            csu._build(csu.CSU_DATASET)
+            info = csu.load_bulk("424242")
+            self.assertEqual(len(info["rows"]), 7 * 2)  # jen ukazatel s hodnotou
+            self.assertEqual(info["rows"][0]["dims"], ["Počet obyvatel k 1. 1.", "Muži"])  # bez kódových sloupců
+            tbl = csu.csu_table_block(info)
+            self.assertEqual(tbl["headers"], ["Rok", "Počet obyvatel k 1. 1. / Muži", "Počet obyvatel k 1. 1. / Ženy"])
+            self.assertTrue(all(c["text"].strip() not in ("", "–") for r in tbl["rows"] for c in r[1:]))
+        finally:
+            net.open_stream = orig
+            os.replace(db + ".bak", db)
+
     def test_csu_api(self):
         info = csu.csu_load(demo.KOD_OBCE)
         self.assertEqual(info["via"], "api")

@@ -55,6 +55,20 @@ def _fresh(dataset):
         return False
 
 
+def _is_number(v):
+    try:
+        float(str(v).strip().replace(" ", "").replace(",", "."))
+        return True
+    except ValueError:
+        return False
+
+
+def _code_like(h):
+    """Hlavička kódového sloupce DataStatu: ASCII a buď obsahuje číslici, nebo velké písmeno uvnitř (IndicatorType, CasR, Uz0)."""
+    h = h.strip()
+    return h.isascii() and " " not in h and (any(c.isdigit() for c in h) or any(c.isupper() for c in h[1:]))
+
+
 def _norm_key(v):
     k = str(v).strip().lstrip("0")
     return k if k.isdigit() and len(k) >= 5 else ""  # kódy obcí mají 5-6 číslic; kratší kódy jsou vyšší celky
@@ -83,10 +97,11 @@ def _build(dataset):
             year_i = next((i for i, h in enumerate(low) if h in ("roky", "rok", "year")), None)
             if year_i is None:
                 year_i = next((i for i, h in enumerate(low) if re.search(r"^cas|rok|year", h)), None)
-            other = [i for i in range(len(header)) if i not in terr and i != val_i and i != year_i]
+            other = [i for i in range(len(header)) if i not in terr and i != val_i and i != year_i
+                     and not _code_like(header[i])]  # sloupce s kódy (IndicatorType, CasR, Uz0…) duplikují sloupce s názvy
             for row in reader:
-                if len(row) <= val_i:
-                    continue
+                if len(row) <= val_i or not _is_number(row[val_i]):
+                    continue  # prázdné hodnoty (např. ukazatele, které na úrovni obcí neexistují) se neukládají
                 keys = {_norm_key(row[i]) for i in terr if i < len(row)} - {""}
                 if not keys:
                     continue
@@ -313,7 +328,7 @@ def diagnose(kod, dataset=CSU_DATASET):
 
 def fmt_num(s):
     try:
-        return f"{int(float(s)):,}".replace(",", " ")
+        return f"{int(float(str(s).replace(' ', '').replace(',', '.'))):,}".replace(",", " ")
     except (TypeError, ValueError):
         return s
 
@@ -324,8 +339,9 @@ def csu_table_block(info):
 
     def combo(r):
         return " / ".join(x for x in r["dims"] if x)
-    cols = sorted({combo(r) for r in rows})[:MAX_COLS]
-    val = {(r["year"], combo(r)): r["value"] for r in rows}
+    shown = {r["year"] for r in rows if r["year"] in years}
+    cols = sorted({combo(r) for r in rows if r["year"] in shown and _is_number(r["value"])})[:MAX_COLS]
+    val = {(r["year"], combo(r)): r["value"] for r in rows if _is_number(r["value"])}
     body = [[y] + [cell_right(fmt_num(val.get((y, c), "–"))) for c in cols] for y in years]
     return table(["Rok"] + cols, body, "ČSÚ pro tuto obec nevrátil žádné řádky.")
 

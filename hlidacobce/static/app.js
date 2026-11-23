@@ -203,5 +203,6 @@
     });
   }
 
-  getJSON("/api/status").then(function (s) { if (s && s.demo) $("#demo").hidden = false; });
+  getJSON("/api/status").then(function (s) { if (s && s.demo) $("#demo").hidden = false;
+    if (s && s.version) $("#ver").textContent = "Verze " + s.version + (s.commit ? " · nasazený commit " + s.commit : ""); });
 })();
