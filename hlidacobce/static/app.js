@@ -83,10 +83,24 @@
     if (data.error) { target.appendChild(el("p", "msg err", data.error)); return; }
     (data.cards || []).forEach(function (c) { target.appendChild(renderCard(c)); });
   }
-  function load(target, url, done) {
-    target.textContent = "";
-    target.appendChild(el("p", "loading", "Načítám data ze zdrojů, může to trvat desítky sekund…"));
-    getJSON(url).then(function (d) { showCards(target, d); if (done) done(d); });
+  var MAX_RETRIES = 40, RETRY_MS = 8000;
+  function load(target, url, done, attempt) {
+    attempt = attempt || 0;
+    if (!attempt) {
+      target.dataset.url = url;
+      target.textContent = "";
+      target.appendChild(el("p", "loading", "Načítám data ze zdrojů, může to trvat desítky sekund…"));
+    }
+    getJSON(url).then(function (d) {
+      if (attempt && target.dataset.url !== url) return;  // mezitím se načítá jiná obec/záložka
+      showCards(target, d);
+      if (done) done(d);
+      var waiting = (d.cards || []).some(function (c) { return c.retry; });
+      if (waiting && attempt < MAX_RETRIES) {
+        setTimeout(function () { if (target.dataset.url === url) load(target, url, done, attempt + 1); }, RETRY_MS);
+      }
+    });
+    target.dataset.url = url;
   }
 
   /* ---------- krok 1: výběr obce ---------- */

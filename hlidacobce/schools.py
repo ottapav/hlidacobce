@@ -10,7 +10,7 @@ import threading
 import xml.etree.ElementTree as ET
 from datetime import date
 
-from . import ares, net
+from . import ares, net, webcheck
 from .util import fold, norm_ico
 
 REJSTRIK_URL = "https://rejstriky.msmt.cz/opendata/vrejcelk.xml"
@@ -112,10 +112,34 @@ def _load_index(force):
     return index
 
 
+HLIDAC_VAZBY = "https://www.hlidacstatu.cz/subjekt/Vazby/{ico}"
+
+
+def schools_from_hlidac(obec_ico):  # noqa: D401
+    """Podřízené organizace obce ze stránky Vazby na Hlídači státu (vedeno podle obchodního rejstříku).
+    Z odkazů na subjekty vybere ty, jejichž název vypadá jako škola/školka. Struktura stránky nebyla ověřena naživo."""
+    ico = norm_ico(obec_ico)
+    _, html = net.fetch_page(HLIDAC_VAZBY.format(ico=ico))
+    names = {}
+    for href, text in webcheck.parse_html(html).links:
+        m = re.search(r"/subjekt/(\d{8})(?:[/?#]|$)", href)
+        if m and m.group(1) != ico and len(text) > len(names.get(m.group(1), "")):
+            names[m.group(1)] = text
+    return [{"ico": i, "name": n, "red_izo": "", "kinds": sorted(classify(n)), "web": "", "address": "", "source": "Hlídač státu"}
+            for i, n in names.items() if classify(n)]
+
+
 def schools_for_obec(obec_ico, kind):
-    """Školy (kind='zs') nebo školky (kind='ms') zřizované obcí."""
+    """Školy (kind='zs') nebo školky (kind='ms') zřizované obcí.
+    Nejdřív Hlídač státu (rychlé, jedna malá stránka); když nic nenajde nebo selže, rejstřík škol MŠMT (velký soubor)."""
+    try:
+        found = schools_from_hlidac(obec_ico)
+        if found:
+            return [e for e in found if kind in e["kinds"]]
+    except (net.ApiError, ValueError):
+        pass
     idx = load_index()
-    return [e for e in idx.get(norm_ico(obec_ico), []) if kind in e["kinds"]]
+    return [dict(e, source="rejstřík MŠMT") for e in idx.get(norm_ico(obec_ico), []) if kind in e["kinds"]]
 
 
 def school_by_ico(ico, kind):

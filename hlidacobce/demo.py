@@ -122,6 +122,17 @@ def _html(title, body, links=()):
 def fake_page(url):
     p = urllib.parse.urlparse(url)
     host, path = p.netloc, p.path.rstrip("/") or "/"
+    if host == "www.hlidacstatu.cz":
+        m = re.fullmatch(r"/subjekt/Vazby/(\d{8})", path)
+        if m and m.group(1) == OBEC_ICO:
+            body = ('<h2>Podřízené organizace</h2>'
+                    f'<a href="/subjekt/{SKOLA_ICO}">Základní škola a mateřská škola Ukázkov, příspěvková organizace</a> '
+                    '<a href="/subjekt/70000003">Mateřská škola Pohádka, příspěvková organizace</a> '
+                    '<a href="/subjekt/70000009">Technické služby Ukázkov, příspěvková organizace</a> '
+                    '<a href="/subjekt/00100002">Městys Ukázkov Nový</a> <a href="/subjekt/Vazby/00100001">Vazby</a>')
+            return url, _html("Vazby", body)
+        from . import net
+        raise net.ApiError("Web vrátil HTTP 404", 404)
     if host == "skola.demo":
         nav = [("/skolni-rad", "Školní řád"), ("/dokumenty", "Dokumenty ke stažení"), ("/zapis", "Zápis do 1. třídy"),
                ("/kontakt", "Kontakt"), ("/informace", "Informace")]

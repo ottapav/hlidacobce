@@ -10,7 +10,7 @@ import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import __version__, contracts, net, tabs
+from . import __version__, contracts, csu, net, tabs
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
 TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "application/javascript; charset=utf-8"}
@@ -166,6 +166,7 @@ def serve(port=8765, open_browser=True, host="127.0.0.1"):
         print("REŽIM DEMO: všechna data jsou vymyšlená, nic se nestahuje z internetu.")
     elif not contracts.token():
         print("Upozornění: není nastaven HLIDAC_TOKEN, karty Registru smluv budou jen vysvětlovat, jak token získat.")
+    csu.warm_up()  # data ČSÚ se začnou připravovat hned, ještě než o ně někdo požádá
     if open_browser:
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()
     try:

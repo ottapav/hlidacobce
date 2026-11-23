@@ -45,19 +45,58 @@ class TestModules(Base):
         finally:
             os.environ["HLIDAC_TOKEN"] = old
 
+    def test_csu_index(self):
+        self.assertTrue(os.path.exists(csu._db_path(csu.CSU_DATASET)) or csu.csu_load(demo.KOD_OBCE))
+        self.assertEqual(len(csu.csu_load(demo.KOD_OBCE)["rows"]), 30)
+        self.assertEqual(csu.csu_load("111111")["rows"][0]["value"], "7")  # řádky jiných obcí jsou v indexu také
+        self.assertEqual(csu.csu_load("424242")["rows"], [])
+
+    def test_csu_preparing(self):
+        net.set_demo(False)
+        try:
+            with csu._lock:
+                old = dict(csu.STATE)
+                csu.STATE.update(status="building", error=None, t=0)
+            os.rename(csu._db_path(csu.CSU_DATASET), csu._db_path(csu.CSU_DATASET) + ".bak")
+            try:
+                c = csu.population_card(demo.KOD_OBCE)
+                self.assertTrue(c["retry"])
+                self.assertEqual(c["status"], "info")
+            finally:
+                os.rename(csu._db_path(csu.CSU_DATASET) + ".bak", csu._db_path(csu.CSU_DATASET))
+                with csu._lock:
+                    csu.STATE.update(old)
+        finally:
+            net.set_demo(True)
+
     def test_csu(self):
         c = csu.population_card(demo.KOD_OBCE)
         self.assertEqual(c["status"], "info")
         self.assertEqual(len(c["blocks"][0]["rows"]), 5)
         self.assertEqual(csu.population_card("")["status"], "error")
 
-    def test_schools(self):
+    def test_schools_from_hlidac(self):
         zs = schools.schools_for_obec(demo.OBEC_ICO, "zs")
         ms = schools.schools_for_obec(demo.OBEC_ICO, "ms")
         self.assertEqual([s["ico"] for s in zs], [demo.SKOLA_ICO])
-        self.assertEqual([s["ico"] for s in ms], [demo.SKOLA_ICO])
-        self.assertEqual(zs[0]["web"], "https://skola.demo")
-        self.assertEqual(schools.schools_for_obec("99999999", "ms")[0]["ico"], "70000002")
+        self.assertEqual(sorted(s["ico"] for s in ms), sorted([demo.SKOLA_ICO, "70000003"]))  # technické služby se vyřadí
+        self.assertEqual(zs[0]["source"], "Hlídač státu")
+
+    def test_schools_fallback_to_rejstrik(self):
+        r = schools.schools_for_obec("99999999", "ms")  # Hlídač stránku nemá (404) -> rejstřík MŠMT
+        self.assertEqual(r[0]["ico"], "70000002")
+        self.assertEqual(r[0]["source"], "rejstřík MŠMT")
+        zs = schools.parse_rejstrik(__import__("io").BytesIO(demo.XML))[demo.OBEC_ICO][0]
+        self.assertEqual(zs["web"], "https://skola.demo")
+
+    def test_overview_pads_contracts_without_value(self):
+        raw = demo._obec_contracts()[:2] + [{"Id": 1000 + i, "predmet": f"Bez ceny {i}", "datumUzavreni": demo._d(i + 1),
+                                             "casZverejneni": demo._d(i + 1), "platce": {"ico": demo.OBEC_ICO}, "prijemce": []}
+                                            for i in range(12)]
+        cs = [contracts.normalize(r, demo.OBEC_ICO) for r in raw]
+        top = contracts._overview(demo.OBEC_ICO, cs, __import__("datetime").date.today(), "")["blocks"][2]["rows"]
+        self.assertEqual(len(top), 10)
+        self.assertEqual(top[2][1]["text"], "Bez ceny 0")
 
     def test_webcheck_school(self):
         cs = webcheck.web_cards("skola.demo", "zs")
@@ -122,7 +161,7 @@ class TestServer(Base):
         self.assertEqual(json.loads(b)["obce"][0]["ico"], demo.OBEC_ICO)
         self.assertEqual(self.get("/api/obce?q=a")[0], 200)
         d = json.loads(self.get(f"/api/schools?obec={demo.OBEC_ICO}&kind=ms")[1])
-        self.assertEqual(len(d["schools"]), 1)
+        self.assertEqual(len(d["schools"]), 2)
         for path in (f"/api/tab/obec?ico={demo.OBEC_ICO}", f"/api/tab/csu?ico={demo.OBEC_ICO}",
                      f"/api/tab/school?kind=zs&ico={demo.SKOLA_ICO}&web=skola.demo"):
             s, b = self.get(path)

@@ -1,4 +1,6 @@
 """Veškerý síťový přístup na jednom místě (kvůli testům a režimu --demo)."""
+import gzip
+import io
 import ipaddress
 import json
 import re
@@ -50,16 +52,41 @@ def http_json(url, headers=None, data=None, retries=3, timeout=30):
     raise ApiError(f"Zdroj {_host(url)} není dostupný ({type(last).__name__})")
 
 
+class _Raw(io.RawIOBase):
+    def __init__(self, src, resp=None):
+        super().__init__()
+        self._src, self._resp = src, resp
+
+    def readable(self):
+        return True
+
+    def readinto(self, b):
+        data = self._src.read(len(b))
+        b[:len(data)] = data
+        return len(data)
+
+    def close(self):
+        try:
+            self._src.close()
+            if self._resp is not None:
+                self._resp.close()
+        finally:
+            super().close()
+
+
 def open_stream(url, timeout=180):
-    """Otevře velký soubor (CSV/XML) pro streamované čtení. Volající ho zavře (with)."""
+    """Otevře velký soubor (CSV/XML) pro streamované čtení; komprimovaný přenos (gzip) je výrazně rychlejší.
+    Vrací binární buffered soubor, volající ho zavře (with)."""
     if DEMO:
         from . import demo
         return demo.fake_stream(url)
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Encoding": "gzip"})
     try:
-        return urllib.request.urlopen(req, timeout=timeout)
+        resp = urllib.request.urlopen(req, timeout=timeout)
     except (urllib.error.URLError, TimeoutError, OSError) as ex:
         raise ApiError(f"Soubor z {_host(url)} se nepodařilo stáhnout ({type(ex).__name__})") from ex
+    src = gzip.GzipFile(fileobj=resp) if resp.headers.get("Content-Encoding", "").lower() == "gzip" else resp
+    return io.BufferedReader(_Raw(src, resp), 1 << 20)
 
 
 def _host(url):

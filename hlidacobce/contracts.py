@@ -1,4 +1,5 @@
 """Registr smluv (Hlídač státu): stažení smluv a signály ke kontrole -> karty."""
+import json
 import os
 import re
 import time
@@ -55,7 +56,7 @@ def fetch_contracts(ico, since, tok):
         items = data if isinstance(data, list) else pick(data, "results", "items", "data") or []
         fresh = 0
         for it in items:
-            sid = str(pick(it, "id", "idVerze", "idSmlouvy"))
+            sid = str(pick(it, "id", "idVerze", "idSmlouvy") or json.dumps(it, sort_keys=True, default=str))
             if sid in seen:
                 continue
             seen.add(sid)
@@ -81,7 +82,7 @@ def normalize(raw, ico):
         prij = [prij]
     parties = [party(p) for p in ([plat] if plat else []) + list(prij)]
     others = [p for p in parties if p["ico"] != ico] or [{"ico": "", "name": "(neuvedeno)", "key": "(neuvedeno)"}]
-    bez, vat = num(pick(raw, "hodnotaBezDph", "cenaBezDph")), num(pick(raw, "hodnotaVcetneDph", "cenaSDph"))
+    bez, vat = num(pick(raw, "hodnotaBezDph", "cenaBezDph")), num(pick(raw, "hodnotaVcetneDph", "cenaSDph", "calculatedPriceWithVATinCZK"))
     sid = str(pick(raw, "id", "idVerze", "idSmlouvy", default=""))
     return {
         "id": sid,
@@ -232,15 +233,23 @@ def _signal_cards(cs):
 
 def _overview(ico, cs, since, note):
     total = sum(c["value"] for c in cs if c["value"])
-    top = sorted([c for c in cs if c["value"]], key=lambda c: -c["value"])[:10]
+    with_val = sorted([c for c in cs if c["value"]], key=lambda c: -c["value"])[:10]
+    rest = sorted([c for c in cs if not c["value"]], key=lambda c: c["signed"] or date.min, reverse=True)
+    top = with_val + rest[:10 - len(with_val)]
+    n_val = sum(1 for c in cs if c["value"])
+    head = "10 největších smluv" if len(with_val) >= 10 or not rest else \
+        f"Největší smlouvy ({len(with_val)} s uvedenou hodnotou, doplněno nejnovějšími bez hodnoty)"
     return card("Registr smluv – přehled", SRC, "info" if cs else "warn", today_str(),
                 f"Smlouvy podepsané od {cz_date(since)}.",
-                [kv([("Počet smluv", len(cs)), ("Celková hodnota bez DPH", czk(total))]),
-                 heading("10 největších smluv"),
+                [kv([("Počet smluv", len(cs)), ("z toho s uvedenou hodnotou", n_val),
+                     ("Celková hodnota bez DPH", czk(total))]),
+                 heading(head),
                  table(["Podepsáno", "Předmět", "Protistrana", "Hodnota bez DPH"],
                        [[cz_date(c["signed"]), _link(c), party_names(c), cell_right(czk(c["value"]))] for c in top],
                        "V období nejsou v registru žádné smlouvy.")],
-                [("Profil na Hlídači státu", f"https://www.hlidacstatu.cz/subjekt/{ico}")], [note])
+                [("Profil na Hlídači státu", f"https://www.hlidacstatu.cz/subjekt/{ico}")],
+                [note] + ([f"Hodnotu nemá {len(cs) - n_val} smluv (v registru není uvedena nebo se ji nepodařilo přečíst z odpovědi API)."]
+                          if n_val < len(cs) else []))
 
 
 def _merge(cards_, title):

@@ -1,7 +1,7 @@
 """Struktura karty, kterou server posílá do prohlížeče.
 
 Karta = jeden zdroj údajů:
-  {"title", "source", "status", "asof", "intro", "blocks": [...], "links": [{"text","url"}], "notes": [...]}
+  {"title", "source", "status", "asof", "intro", "blocks": [...], "links": [{"text","url"}], "notes": [...], "retry": bool}
 status: ok | warn | info | link | error
 Bloky: heading, text, list, kv, table. Buňka tabulky je text nebo {"text", "url"} či {"text", "align"}.
 """
@@ -10,7 +10,7 @@ from datetime import date
 from .util import cz_date
 
 
-def card(title, source, status="info", asof=None, intro=None, blocks=None, links=None, notes=None):
+def card(title, source, status="info", asof=None, intro=None, blocks=None, links=None, notes=None, retry=False):
     return {
         "title": title,
         "source": source,
@@ -20,6 +20,7 @@ def card(title, source, status="info", asof=None, intro=None, blocks=None, links
         "blocks": blocks or [],
         "links": [{"text": t, "url": u} for t, u in (links or [])],
         "notes": notes or [],
+        "retry": bool(retry),  # klient kartu po chvíli načte znovu (data se připravují)
     }
 
 
