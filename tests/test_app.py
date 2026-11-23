@@ -183,13 +183,32 @@ class TestModules(Base):
         self.assertEqual(found["Prohlášení o přístupnosti webu"], "nenalezeno")
         self.assertEqual(check["status"], "warn")
 
+    def test_find_site_from_hlidac(self):
+        self.assertEqual(webcheck.find_site(demo.OBEC_ICO), "https://obec.demo/")
+        self.assertEqual(webcheck.find_site(demo.SKOLA_ICO), "https://skola.demo")  # YouTube odkaz se ignoruje
+        self.assertIsNone(webcheck.find_site("70000003"))
+
+    def test_web_cards_found_automatically(self):
+        cs = webcheck.web_cards_for_ico(demo.SKOLA_ICO, "zs")
+        self.assertEqual([c["title"] for c in cs][0], "Dostupnost webu (jednorázové měření)")
+        self.assertIn("https://skola.demo", cs[0]["intro"])
+        obec = tabs.tab_obec(demo.OBEC_ICO)["cards"]
+        chk = next(c for c in obec if c["title"].startswith("Povinně zveřejňované informace"))
+        found = {r[0]: r[1] for r in chk["blocks"][0]["rows"]}
+        self.assertEqual((found["Úřední deska"], found["Rozpočet obce"]), ("nalezeno", "nalezeno"))
+
+    def test_web_not_in_hlidac(self):
+        cs = webcheck.web_cards_for_ico("70000003", "ms")
+        self.assertEqual((len(cs), cs[0]["status"]), (1, "warn"))
+        self.assertNotIn("pole", cs[0]["intro"])  # žádná výzva k ručnímu zadání
+
     def test_webcheck_errors(self):
         self.assertEqual(webcheck.web_cards("neexistuje.demo", "ms")[0]["status"], "error")
         self.assertEqual(webcheck.web_cards("", "ms")[0]["status"], "warn")
 
     def test_tabs(self):
-        for t in (tabs.tab_obec(demo.OBEC_ICO, "obec.demo"), tabs.tab_csu(demo.OBEC_ICO),
-                  tabs.tab_school("ms", demo.SKOLA_ICO, "skola.demo")):
+        for t in (tabs.tab_obec(demo.OBEC_ICO), tabs.tab_csu(demo.OBEC_ICO),
+                  tabs.tab_school("ms", demo.SKOLA_ICO)):
             self.assertTrue(t["cards"])
             json.dumps(t)
 
@@ -244,6 +263,9 @@ class TestServer(Base):
             self.assertEqual(s, 200)
             self.assertTrue(json.loads(b)["cards"])
         self.assertEqual(self.get("/api/tab/obec?ico=abc")[0], 400)
+        # adresu webu od uživatele server nepřijímá (žádné ruční zadání, žádné SSRF)
+        s, b = self.get(f"/api/tab/school?kind=zs&ico={demo.SKOLA_ICO}&web=http://127.0.0.1:1/")
+        self.assertNotIn("127.0.0.1", b.decode())
         self.assertEqual(self.get("/api/nic")[0], 404)
 
     def test_head_and_http11(self):

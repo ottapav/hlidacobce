@@ -5,8 +5,8 @@ Nejdřív se zeptá na název obce, teprve potom načte data do karet. Každá k
 
 | Záložka | Karty |
 |---|---|
-| **Obec** | ARES (základní údaje), Registr smluv z Hlídače státu (přehled + 6 signálů ke kontrole), volitelná kontrola webu obce (úřední deska, rozpočet, závěrečný účet…), odkazy na MF Monitor, koeficient daně z nemovitých věcí, sbírku vyhlášek |
-| **Škola** / **Školka** | zařízení zřizovaná obcí z rejstříku škol MŠMT (nebo ruční zadání IČO), ARES, kontrola webu podle seznamu povinně zveřejňovaných informací (školní řád, ŠVP, úplata, kritéria přijímání, výroční zpráva, GDPR pověřenec, přístupnost…) s právní oporou, Registr smluv, odkazy na ČŠI a rejstříky |
+| **Obec** | ARES (základní údaje), Registr smluv z Hlídače státu (přehled + 6 signálů ke kontrole), kontrola webu obce (úřední deska, rozpočet, závěrečný účet…), odkazy na MF Monitor, koeficient daně z nemovitých věcí, sbírku vyhlášek |
+| **Škola** / **Školka** | zařízení zřizovaná obcí (Hlídač státu, záloha ARES a rejstřík MŠMT) , ARES, kontrola webu podle seznamu povinně zveřejňovaných informací (školní řád, ŠVP, úplata, kritéria přijímání, výroční zpráva, GDPR pověřenec, přístupnost…) s právní oporou, Registr smluv, odkazy na ČŠI a rejstříky |
 | **ČSÚ** | obyvatelstvo podle pohlaví a věku (DataStat API, výběr jedné obce; záloha: celý CSV soubor), odkazy na SLDB 2021 a Registr ekonomických subjektů |
 
 ## Spuštění
@@ -43,7 +43,7 @@ Měření dostupnosti webů v čase, upozornění na nové smlouvy od minulého 
 Vývoj proběhl bez přístupu k živým zdrojům, proto platí:
 
 - **Otestováno** na vymyšlených datech (`--demo`): logika signálů, parsery, server, rozhraní.
-- **Neověřeno naživo**: cesta a pole API Hlídače státu (`HLIDAC_SEARCH_PATH` v `contracts.py`, pole čte tolerantně), dotaz na DataStat API (kódy dimenzí jsou z katalogu sady OBY02E, formát odpovědi JSON-stat ověřen jen na vzorku) a záložní CSV ČSÚ (sloupce se rozpoznávají podle hlavičky), struktura XML rejstříku škol MŠMT, odpovědi ARES. Když něco nesedí, karta ukáže chybu a odkaz na zdroj; školu lze vždy zadat ručně přes IČO.
+- **Neověřeno naživo**: cesta a pole API Hlídače státu (`HLIDAC_SEARCH_PATH` v `contracts.py`, pole čte tolerantně), dotaz na DataStat API (kódy dimenzí jsou z katalogu sady OBY02E, formát odpovědi JSON-stat ověřen jen na vzorku) a záložní CSV ČSÚ (sloupce se rozpoznávají podle hlavičky), struktura XML rejstříku škol MŠMT, odpovědi ARES. Když něco nesedí, karta ukáže chybu a odkaz na zdroj; nic se nezadává ručně: školy i adresy webů se zjišťují z registrů.
 - **Kontrola webu je heuristika**: hledá klíčová slova v textu a odkazech. „Nenalezeno“ neznamená „nezveřejněno“ (web může být generovaný JavaScriptem, dokumenty mohou být jinde).
 - **Právní opory jsou orientační**, nejde o právní poradenství. Před jakýmkoli závěrem ověřte znění předpisů.
 - Registr smluv neobsahuje smlouvy do 50 000 Kč a obce do 3 000 obyvatel mají výjimku; u škol se povinnost týká jen zřizovaných ORP nebo krajem.

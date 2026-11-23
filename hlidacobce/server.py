@@ -154,13 +154,12 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"error": "Nenalezeno."}, 404)
 
     def _tab(self, tab, ico, q):
-        web = q.get("web", "").strip()[:300]
         if tab == "obec":
-            return self._json(tabs.tab_obec(ico, web))
+            return self._json(tabs.tab_obec(ico))
         if tab == "csu":
             return self._json(tabs.tab_csu(ico))
         if tab == "school":
-            return self._json(tabs.tab_school(q.get("kind", ""), ico, web, q.get("red_izo", "")[:20]))
+            return self._json(tabs.tab_school(q.get("kind", ""), ico))
         self._json({"error": "Nenalezeno."}, 404)
 
 

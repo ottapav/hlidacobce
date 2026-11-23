@@ -7,6 +7,7 @@ from datetime import date, timedelta
 OBEC_ICO = "00100001"
 SKOLA_ICO = "70000001"
 KOD_OBCE = "999999"
+WEBS = {OBEC_ICO: "https://obec.demo/", SKOLA_ICO: "https://skola.demo"}  # adresy webů, jak je uvádí Hlídač státu
 
 
 def _d(days):
@@ -153,6 +154,14 @@ def fake_page(url):
     p = urllib.parse.urlparse(url)
     host, path = p.netloc, p.path.rstrip("/") or "/"
     if host == "www.hlidacstatu.cz":
+        ms = re.fullmatch(r"/[Ss]ubjekt/(\d{8})", path)
+        if ms and ms.group(1) in WEBS:
+            body = ('<div class="odkazy"><span>Webová stránka</span> '
+                    f'<a href="{WEBS[ms.group(1)]}">{WEBS[ms.group(1)]}</a> '
+                    '<a href="https://www.youtube.com/playlist?list=x">Záznamy zastupitelstva</a></div>')
+            return url, _html("Subjekt", body)
+        if ms:
+            return url, _html("Subjekt", '<a href="https://www.youtube.com/watch?v=1">video</a>')
         m = re.fullmatch(r"/subjekt/Vazby/(\d{8})", path)
         if m and m.group(1) == OBEC_ICO:
             body = ('<h2>Podřízené organizace</h2>'

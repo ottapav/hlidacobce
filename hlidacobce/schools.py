@@ -163,9 +163,3 @@ def schools_for_obec(obec_ico, kind):
     except net.ApiError as ex:
         problems.append(f"rejstřík MŠMT: {ex}")
     raise net.ApiError("Školu se nepodařilo najít automaticky (" + "; ".join(problems) + ").")
-
-
-def school_by_ico(ico, kind):
-    """Ruční zadání: údaje z ARES (název, adresa); web musí doplnit uživatel."""
-    b = ares.basic(norm_ico(ico))
-    return {"ico": b["ico"], "name": b["name"], "red_izo": "", "kinds": [kind], "web": "", "address": b["address"]}

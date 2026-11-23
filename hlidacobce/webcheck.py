@@ -15,6 +15,10 @@ from .util import fold
 MAX_PAGES = 18
 SRC = "Web organizace (jednorázová kontrola)"
 SLOW_MS = 3000
+HLIDAC_SUBJEKT = "https://www.hlidacstatu.cz/subjekt/{ico}"
+# odkazy, které nejsou web samotného subjektu (sociální sítě, mapy, rejstříky…)
+NOT_SITE = re.compile(r"(^|\.)(hlidacstatu\.cz|youtube\.com|youtu\.be|facebook\.com|twitter\.com|x\.com|instagram\.com|linkedin\.com|"
+                      r"google\.[a-z.]+|mapy\.cz|github\.com|justice\.cz|ares\.gov\.cz|wikipedia\.org|czso\.cz|csu\.gov\.cz)$", re.I)
 
 # (id, název, regulární výraz nad textem bez diakritiky, právní opora)
 CHECKS = {
@@ -101,6 +105,36 @@ def parse_html(html):
     return p
 
 
+def find_site(ico):
+    """Adresa webu subjektu ze stránky subjektu na Hlídači státu (sekce Odkazy, „Webová stránka“). Vrací URL nebo None.
+    Struktura stránky byla ověřena jen na jednom subjektu; proto se zkouší popisek odkazu, pak odkaz podobný adrese, pak první vhodný."""
+    _, html = net.fetch_page(HLIDAC_SUBJEKT.format(ico=ico))
+    cands = []
+    for href, label in parse_html(html).links:
+        if not re.match(r"^https?://", href or "", re.I):
+            continue
+        host = (urllib.parse.urlparse(href).hostname or "").lower()
+        if host and not NOT_SITE.search(host):
+            cands.append((href, fold(label)))
+    for pred in (lambda l: "webova stranka" in l or l in ("web", "www"),
+                 lambda l: l.startswith(("http", "www.")) or "." in l.replace(" ", "")[:60] and " " not in l.strip(),
+                 lambda l: True):
+        for href, label in cands:
+            if pred(label):
+                return href
+    return None
+
+
+def web_cards_for_ico(ico, kind):
+    """Karty kontroly webu; adresu webu najde sama podle IČO."""
+    try:
+        url = find_site(ico)
+    except (net.ApiError, ValueError) as ex:
+        return [card("Web a povinně zveřejňované informace", SRC, "error", today_str(),
+                     f"Adresu webu se nepodařilo zjistit (Hlídač státu: {ex}).")]
+    return web_cards(url, kind)
+
+
 def normalize_url(u):
     u = (u or "").strip()
     if not u:
@@ -173,7 +207,7 @@ def web_cards(url, kind, name=""):
     """Karty: dostupnost + checklist. Pokud URL chybí, vrací kartu s výzvou."""
     if not normalize_url(url):
         return [card("Web a povinně zveřejňované informace", SRC, "warn", None,
-                     "Adresu webu se nepodařilo zjistit automaticky. Vložte ji do pole nahoře a spusťte kontrolu.")]
+                     "Adresu webu se nepodařilo zjistit: Hlídač státu ji u tohoto subjektu neuvádí, kontrola webu proto neproběhla.")]
     res = crawl(url, MAX_PAGES)
     if not res["ok"]:
         return [card("Dostupnost webu", SRC, "error", today_str(), f"{res['url']} – {res['error']}")]
@@ -183,7 +217,7 @@ def web_cards(url, kind, name=""):
     if total_text < 400:
         notes.append("Na stránkách je velmi málo textu – web může být generovaný JavaScriptem a výsledek kontroly je pak nespolehlivý.")
     avail = card("Dostupnost webu (jednorázové měření)", SRC, status, today_str(),
-                 f"Úvodní stránka odpověděla za {res['ms']} ms (limit pro označení za pomalou: {SLOW_MS} ms).",
+                 f"Web {res['url']} (adresa z Hlídače státu). Úvodní stránka odpověděla za {res['ms']} ms (limit pro označení za pomalou: {SLOW_MS} ms).",
                  [], [("Otevřít web", res["url"])], notes + ["Souvislá historie dostupnosti vyžaduje opakované měření, to aplikace nedělá."])
     items = evaluate(res, kind)
     miss = [i for i in items if not i["found"]]

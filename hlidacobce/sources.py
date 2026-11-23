@@ -47,7 +47,7 @@ def csu_link_cards():
     ]
 
 
-def school_link_cards(kind, red_izo=""):
+def school_link_cards(kind):
     what = "školy" if kind == "zs" else "školky"
     return [
         _link_card(f"Česká školní inspekce – inspekční zprávy", "Česká školní inspekce",
@@ -57,7 +57,7 @@ def school_link_cards(kind, red_izo=""):
                    "Zápis ve školském rejstříku: zřizovatel, kapacita, obory, místa poskytování vzdělávání.",
                    [("Rejstřík škol", "https://rejstriky.msmt.cz/rejskol/"),
                     ("Otevřená data rejstříku", "https://rejstriky.msmt.cz/opendata/")],
-                   [f"RED_IZO: {red_izo}"] if red_izo else None),
+                   None),
         _link_card("Veřejný rejstřík – příspěvková organizace", "Ministerstvo spravedlnosti",
                    "Zřizovací listina, statutární orgán, sídlo a další údaje.",
                    [("Veřejné rejstříky", "https://or.justice.cz/ias/ui/rejstrik")]),

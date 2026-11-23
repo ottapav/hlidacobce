@@ -147,7 +147,7 @@
     });
     if (state.loaded[name]) return;
     state.loaded[name] = true;
-    if (name === "obec") loadObec("");
+    if (name === "obec") loadObec();
     else if (name === "csu") load($("#c-csu"), "/api/tab/csu?" + qs({ ico: state.obec.ico }));
     else initPicker(name);
   }
@@ -161,45 +161,31 @@
   });
 
   /* ---------- záložka Obec ---------- */
-  function loadObec(web) { load($("#c-obec"), "/api/tab/obec?" + qs({ ico: state.obec.ico, web: web })); }
-  $("[data-web-form=obec]").addEventListener("submit", function (e) {
-    e.preventDefault();
-    loadObec($("#web-obec").value.trim());
-  });
+  function loadObec() { load($("#c-obec"), "/api/tab/obec?" + qs({ ico: state.obec.ico })); }
 
-  /* ---------- záložky Škola / Školka ---------- */
+  /* ---------- záložky Škola / Školka: zařízení se najdou samy, nic se nezadává ručně ---------- */
+  function loadSchool(kind, s) {
+    load($("#c-" + kind), "/api/tab/school?" + qs({ kind: kind, ico: s.ico }));
+  }
   function initPicker(kind) {
-    var box = $(".school-picker[data-kind=" + kind + "]");
+    var box = $(".school-picker[data-kind=" + kind + "]"), word = kind === "zs" ? "školu" : "školku";
     box.textContent = "";
-    box.appendChild(el("p", "loading", "Hledám v rejstříku škol zařízení zřizovaná obcí…"));
+    box.appendChild(el("p", "loading", "Hledám " + word + " zřizovanou obcí…"));
     getJSON("/api/schools?" + qs({ obec: state.obec.ico, kind: kind })).then(function (d) {
       box.textContent = "";
-      var word = kind === "zs" ? "školu" : "školku";
-      var sel = el("select"), list = d.schools || [];
-      sel.id = "sel-" + kind; sel.setAttribute("aria-label", "Vyberte " + word);
-      var lab = el("label", null, "Vyberte " + word + " zřizovanou obcí"); lab.htmlFor = sel.id;
-      if (d.error) box.appendChild(el("p", "msg err", d.error));
-      else if (!list.length) box.appendChild(el("p", "muted", "V rejstříku jsem pro tuto obec nic nenašel. Zadejte IČO ručně."));
-      if (list.length) {
+      var list = d.schools || [];
+      if (d.error) { box.appendChild(el("p", "msg err", d.error)); return; }
+      if (!list.length) { box.appendChild(el("p", "muted", "Pro tuto obec jsem nenašel žádnou " + word + "."));  return; }
+      if (list.length === 1) {
+        box.appendChild(el("p", null, list[0].name + " (IČO " + list[0].ico + ", zdroj: " + (list[0].source || "registr") + ")"));
+      } else {
+        var sel = el("select"), lab = el("label", null, "Nalezeno " + list.length + " zařízení, vyberte:");
+        sel.id = "sel-" + kind; sel.setAttribute("aria-label", "Vyberte " + word); lab.htmlFor = sel.id;
         list.forEach(function (s, i) { var o = el("option", null, s.name + " (IČO " + s.ico + ")"); o.value = String(i); sel.appendChild(o); });
+        sel.addEventListener("change", function () { loadSchool(kind, list[+sel.value]); });
         box.appendChild(lab); box.appendChild(sel);
       }
-      var ico = el("input"), web = el("input"), go = el("button", null, "Načíst údaje");
-      ico.type = web.type = "text"; ico.id = "ico-" + kind; web.id = "web-" + kind;
-      ico.placeholder = "IČO ručně (nepovinné)"; web.placeholder = "Web (např. www.skola.cz)";
-      var l1 = el("label", null, "IČO zadané ručně"); l1.htmlFor = ico.id;
-      var l2 = el("label", null, "Web zařízení"); l2.htmlFor = web.id;
-      function prefill() { if (list.length && !ico.value) web.value = (list[+sel.value] || {}).web || ""; }
-      sel.addEventListener("change", function () { ico.value = ""; web.value = (list[+sel.value] || {}).web || ""; });
-      prefill();
-      var r = el("div", "row"); r.appendChild(go);
-      [l1, ico, l2, web, r].forEach(function (x) { box.appendChild(x); });
-      go.addEventListener("click", function () {
-        var chosen = list.length ? list[+sel.value] : null, manual = ico.value.replace(/\s/g, "");
-        var useIco = manual || (chosen && chosen.ico);
-        if (!useIco) { $("#c-" + kind).textContent = ""; $("#c-" + kind).appendChild(el("p", "msg err", "Vyberte zařízení nebo zadejte IČO.")); return; }
-        load($("#c-" + kind), "/api/tab/school?" + qs({ kind: kind, ico: useIco, web: web.value.trim(), red_izo: manual ? "" : (chosen && chosen.red_izo) }));
-      });
+      loadSchool(kind, list[0]);
     });
   }
 
