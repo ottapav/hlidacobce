@@ -131,6 +131,20 @@ class TestServer(Base):
         self.assertEqual(self.get("/api/tab/obec?ico=abc")[0], 400)
         self.assertEqual(self.get("/api/nic")[0], 404)
 
+    def test_head_and_http11(self):
+        import http.client
+        c = http.client.HTTPConnection("127.0.0.1", self.port)
+        for path in ("/", "/healthz", "/api/status"):
+            c.request("HEAD", path)
+            r = c.getresponse()
+            self.assertEqual(r.status, 200)
+            self.assertEqual(r.read(), b"")
+            self.assertEqual(r.version, 11)
+        c.request("GET", "/healthz")  # totéž spojení (keep-alive) funguje dál
+        r = c.getresponse()
+        self.assertEqual((r.status, r.read()), (200, b"ok"))
+        c.close()
+
     def test_host_header(self):
         self.assertEqual(self.get("/api/status", host="evil.example")[0], 403)
 

@@ -2,11 +2,17 @@
 """Hlídač obce – spuštění: python3 app.py [--port 8765] [--no-browser] [--demo]"""
 import argparse
 import os
+import sys
 
 from hlidacobce import net, server
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):  # logy hostingu nesmí spadnout na znacích s diakritikou
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
     ap = argparse.ArgumentParser(description="Hlídač obce: přehled veřejných zdrojů o obci, škole a školce (spouští se na zavolání).")
     hosted = bool(os.environ.get("PORT"))  # Render a podobné hostingy nastavují PORT
     ap.add_argument("--host", default="0.0.0.0" if hosted else "127.0.0.1", help="adresa, na které server poslouchá")

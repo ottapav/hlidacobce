@@ -39,6 +39,8 @@ def rate_limited(ip, now=None):
 
 class Handler(BaseHTTPRequestHandler):
     server_version = f"hlidacobce/{__version__}"
+    protocol_version = "HTTP/1.1"  # proxy (Render) čekají HTTP/1.1; každá odpověď má Content-Length
+    timeout = 30                   # neaktivní spojení se po 30 s zavřou
 
     def log_message(self, fmt, *args):
         if os.environ.get("HLIDACOBCE_VERBOSE"):
@@ -47,6 +49,7 @@ class Handler(BaseHTTPRequestHandler):
     # -- pomocné
     def _send(self, code, body, ctype):
         data = body if isinstance(body, bytes) else body.encode("utf-8")
+        head_only = self.command == "HEAD"
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
@@ -54,7 +57,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'")
         self.end_headers()
-        self.wfile.write(data)
+        if not head_only:
+            self.wfile.write(data)
 
     def _json(self, obj, code=200):
         self._send(code, json.dumps(obj, ensure_ascii=False), "application/json; charset=utf-8")
@@ -67,10 +71,18 @@ class Handler(BaseHTTPRequestHandler):
         return host in ("127.0.0.1", "localhost", "[::1]")
 
     def _client_ip(self):
-        fwd = (self.headers.get("X-Forwarded-For") or "").split(",")[-1].strip()
+        """IP klienta za proxy: preferujeme hlavičky hostingu, jinak první adresu z X-Forwarded-For."""
+        for h in ("True-Client-IP", "CF-Connecting-IP"):
+            v = (self.headers.get(h) or "").strip()
+            if v:
+                return v
+        fwd = (self.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
         return fwd or self.client_address[0]
 
     # -- routování
+    def do_HEAD(self):  # health checky a uptime monitory často používají HEAD
+        self.do_GET()
+
     def do_GET(self):
         if not self._host_ok():
             return self._json({"error": "Nepovolený Host."}, 403)
