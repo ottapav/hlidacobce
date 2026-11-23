@@ -122,24 +122,47 @@ def schools_from_hlidac(obec_ico):  # noqa: D401
     _, html = net.fetch_page(HLIDAC_VAZBY.format(ico=ico))
     names = {}
     for href, text in webcheck.parse_html(html).links:
-        m = re.search(r"/subjekt/(\d{8})(?:[/?#]|$)", href)
+        m = re.search(r"/subjekt/(?:index/)?(\d{8})(?:[/?#]|$)", href, re.I)
         if m and m.group(1) != ico and len(text) > len(names.get(m.group(1), "")):
             names[m.group(1)] = text
     return [{"ico": i, "name": n, "red_izo": "", "kinds": sorted(classify(n)), "web": "", "address": "", "source": "Hlídač státu"}
             for i, n in names.items() if classify(n)]
 
 
+def schools_from_ares(obec_ico):
+    """Příspěvkové organizace se sídlem v obci (ARES), vybrané podle názvu. Nemusí jít vždy o zřizovatele obec."""
+    kod = ares.basic(norm_ico(obec_ico))["kod_obce"]
+    if not kod:
+        raise net.ApiError("ARES nevrátil kód obce")
+    out = []
+    for b in ares.search_by_seat(kod, "331"):
+        k = classify(b["name"])
+        if k and b["ico"] != norm_ico(obec_ico):
+            out.append({"ico": b["ico"], "name": b["name"], "red_izo": "", "kinds": sorted(k), "web": "",
+                        "address": b["address"], "source": "ARES (sídlo v obci)"})
+    return out
+
+
 def schools_for_obec(obec_ico, kind):
-    """Školy (kind='zs') nebo školky (kind='ms') zřizované obcí.
-    Nejdřív Hlídač státu (rychlé, jedna malá stránka); když nic nenajde nebo selže, rejstřík škol MŠMT (velký soubor)."""
+    """Školy (kind='zs') nebo školky (kind='ms') obce. Zdroje v pořadí: Hlídač státu (podřízené organizace),
+    ARES (příspěvkové organizace se sídlem v obci), rejstřík MŠMT (velký soubor). Když žádný nic nenajde, chyba obsahuje důvody."""
+    problems = []
+    for name, fn in (("Hlídač státu", schools_from_hlidac), ("ARES", schools_from_ares)):
+        try:
+            found = fn(obec_ico)
+            if found:
+                return [e for e in found if kind in e["kinds"]]
+            problems.append(f"{name}: nenalezena žádná škola ani školka")
+        except (net.ApiError, ValueError) as ex:
+            problems.append(f"{name}: {ex}")
     try:
-        found = schools_from_hlidac(obec_ico)
-        if found:
-            return [e for e in found if kind in e["kinds"]]
-    except (net.ApiError, ValueError):
-        pass
-    idx = load_index()
-    return [dict(e, source="rejstřík MŠMT") for e in idx.get(norm_ico(obec_ico), []) if kind in e["kinds"]]
+        res = [dict(e, source="rejstřík MŠMT") for e in load_index().get(norm_ico(obec_ico), []) if kind in e["kinds"]]
+        if res:
+            return res
+        problems.append("rejstřík MŠMT: pro obec nic nenalezeno")
+    except net.ApiError as ex:
+        problems.append(f"rejstřík MŠMT: {ex}")
+    raise net.ApiError("Školu se nepodařilo najít automaticky (" + "; ".join(problems) + ").")
 
 
 def school_by_ico(ico, kind):

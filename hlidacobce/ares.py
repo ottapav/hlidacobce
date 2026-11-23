@@ -49,3 +49,10 @@ def search_obce(q):
     exact = {ql, f"obec {ql}", f"město {ql}", f"městys {ql}", f"statutární město {ql}"}
     obce.sort(key=lambda b: (b["name"].lower() not in exact, b["name"]))
     return obce[:15]
+
+
+def search_by_seat(kod_obce, legal_form="331"):
+    """Subjekty dané právní formy se sídlem v obci (příspěvkové organizace = 331). Filtr podle dokumentace ARES, naživo neověřen."""
+    data = net.http_json(f"{ARES}/vyhledat", data={"sidlo": {"kodObce": int(kod_obce)}, "pravniForma": [legal_form],
+                                                   "start": 0, "pocet": 100})
+    return [_brief(x) for x in (pick(data, "ekonomickeSubjekty") or [])]

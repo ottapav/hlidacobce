@@ -107,6 +107,33 @@ class TestModules(Base):
         self.assertEqual(sorted(s["ico"] for s in ms), sorted([demo.SKOLA_ICO, "70000003"]))  # technické služby se vyřadí
         self.assertEqual(zs[0]["source"], "Hlídač státu")
 
+    def test_schools_from_ares(self):
+        r = schools.schools_for_obec("00100002", "zs")  # Hlídač stránku nemá (404) -> ARES podle sídla
+        self.assertEqual([x["ico"] for x in r], ["70000008"])
+        self.assertTrue(r[0]["source"].startswith("ARES"))
+
+    def test_schools_error_lists_reasons(self):
+        net.set_demo(True)
+        orig = schools.load_index
+        schools.load_index = lambda: (_ for _ in ()).throw(net.ApiError("HTTP 404"))
+        try:
+            with self.assertRaises(net.ApiError) as cm:
+                schools.schools_for_obec("00100003", "zs")
+            self.assertIn("Hlídač státu", str(cm.exception))
+            self.assertIn("HTTP 404", str(cm.exception))
+        finally:
+            schools.load_index = orig
+
+    def test_hlidac_links_case_insensitive(self):
+        html = '<a href="/Subjekt/46390529">Masarykova základní škola Velký Osek, okres Kolín</a><a href="/Subjekt/Index/70926735">Mateřská škola Velký Osek</a>'
+        orig = net.fetch_page
+        net.fetch_page = lambda u: (u, html)
+        try:
+            r = schools.schools_from_hlidac("00235873")
+        finally:
+            net.fetch_page = orig
+        self.assertEqual({x["ico"]: x["kinds"] for x in r}, {"46390529": ["zs"], "70926735": ["ms"]})
+
     def test_schools_fallback_to_rejstrik(self):
         r = schools.schools_for_obec("99999999", "ms")  # Hlídač stránku nemá (404) -> rejstřík MŠMT
         self.assertEqual(r[0]["ico"], "70000002")

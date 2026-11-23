@@ -83,6 +83,8 @@ def open_stream(url, timeout=180):
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Encoding": "gzip"})
     try:
         resp = urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.HTTPError as ex:
+        raise ApiError(f"Soubor z {_host(url)} se nepodařilo stáhnout (HTTP {ex.code})", ex.code) from ex
     except (urllib.error.URLError, TimeoutError, OSError) as ex:
         raise ApiError(f"Soubor z {_host(url)} se nepodařilo stáhnout ({type(ex).__name__})") from ex
     src = gzip.GzipFile(fileobj=resp) if resp.headers.get("Content-Encoding", "").lower() == "gzip" else resp

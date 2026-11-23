@@ -10,7 +10,7 @@ import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import __version__, contracts, net, tabs
+from . import __version__, ares, contracts, csu, net, tabs
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
 TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "application/javascript; charset=utf-8"}
@@ -126,6 +126,15 @@ class Handler(BaseHTTPRequestHandler):
             if len(term) < 2:
                 return self._json({"obce": [], "error": "Zadejte alespoň 2 znaky."})
             return self._json(tabs.search_obce(term))
+        if route == "debug/csu":  # ladění: co odpovídá DataStat API pro danou obec (IČO obce nebo kód obce)
+            v = re.sub(r"\s", "", q.get("ico", q.get("kod", "")))
+            kod = v
+            try:
+                if ICO_RE.match(v) and "kod" not in q:
+                    kod = ares.basic(v.zfill(8))["kod_obce"]
+            except net.ApiError as ex:
+                return self._json({"error": f"ARES: {ex}"})
+            return self._json(csu.diagnose(kod))
         if route == "schools":
             ico = self._ico(q, "obec")
             if not ico:

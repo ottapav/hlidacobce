@@ -13,14 +13,14 @@ def _d(days):
     return (date.today() - timedelta(days=days)).isoformat()
 
 
-def _subject(ico, name, legal, founded="1992-01-01", kod=KOD_OBCE):
+def _subject(ico, name, legal, founded="1992-01-01", kod="777777"):
     return {"ico": ico, "obchodniJmeno": name, "pravniForma": legal, "datumVzniku": founded,
             "sidlo": {"textovaAdresa": "Ukázková 1, 123 45 Ukázkov", "kodObce": kod}}
 
 
 def _ares_all():
     return {
-        OBEC_ICO: _subject(OBEC_ICO, "Obec Ukázkov", "801", "1990-11-24"),
+        OBEC_ICO: _subject(OBEC_ICO, "Obec Ukázkov", "801", "1990-11-24", KOD_OBCE),
         "00100002": _subject("00100002", "Městys Ukázkov Nový", "801", "1990-11-24", "888888"),
         SKOLA_ICO: _subject(SKOLA_ICO, "Základní škola a mateřská škola Ukázkov, příspěvková organizace", "331", "2003-01-01"),
         "44444444": _subject("44444444", "Světla Rychle s.r.o.", "112", _d(90 + 200)),
@@ -31,6 +31,12 @@ def fake_json(url, data):
     path = urllib.parse.urlparse(url)
     if "ares.gov.cz" in path.netloc:
         if path.path.endswith("/vyhledat"):
+            seat = ((data or {}).get("sidlo") or {}).get("kodObce")
+            if seat is not None:  # hledání příspěvkových organizací podle sídla
+                if str(seat) == "888888":
+                    return {"ekonomickeSubjekty": [_subject("70000008", "Základní škola Ukázkov Nový, příspěvková organizace", "331", "2001-01-01", "888888"),
+                                                   _subject("70000009", "Technické služby Nový, příspěvková organizace", "331", "2001-01-01", "888888")]}
+                return {"ekonomickeSubjekty": []}
             q = (data or {}).get("obchodniJmeno", "").lower()
             allv = [v for v in _ares_all().values() if v["pravniForma"] == "801" and q in v["obchodniJmeno"].lower()]
             return {"pocetCelkem": len(allv), "ekonomickeSubjekty": allv}

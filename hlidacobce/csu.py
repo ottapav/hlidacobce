@@ -36,6 +36,7 @@ SRC = "Český statistický úřad (DataStat)"
 
 _lock = threading.Lock()
 STATE = {"status": "idle", "error": None, "t": 0.0}  # idle | building | error
+LAST_API = {"error": None, "attempts": []}  # poslední neúspěšný pokus o API (pro kartu a diagnostiku)
 
 
 class Preparing(Exception):
@@ -79,7 +80,9 @@ def _build(dataset):
             if not terr:
                 raise net.ApiError("Soubor ČSÚ neobsahuje rozpoznatelný územní sloupec (hlavička: " + ", ".join(header[:8]) + ").")
             val_i = low.index("hodnota") if "hodnota" in low else len(header) - 1
-            year_i = next((i for i, h in enumerate(low) if re.search(r"^cas|rok|year", h)), None)
+            year_i = next((i for i, h in enumerate(low) if h in ("roky", "rok", "year")), None)
+            if year_i is None:
+                year_i = next((i for i, h in enumerate(low) if re.search(r"^cas|rok|year", h)), None)
             other = [i for i in range(len(header)) if i not in terr and i != val_i and i != year_i]
             for row in reader:
                 if len(row) <= val_i:
@@ -257,10 +260,12 @@ def load_api(kod, dataset=CSU_DATASET):
     cfg = discover(dataset)
     url = f"{API}/dotaz/v1/data/sady/{dataset}/vlastni?verzeSady={cfg['verze']}&format=JSON_STAT"
     last = None
+    LAST_API["attempts"] = []
     # první pokus s kódy variant dimenzí, druhý s obecnými typy dimenzí (dokumentace kód dimenze přesně nespecifikuje)
     for names in (cfg, {k: API_TYPES[k] for k in API_TYPES}):
         try:
             data = net.http_json(url, data=_query_body(cfg, kod, names), retries=1, timeout=30)
+            LAST_API["attempts"].append({"dims": dict(names), "response": json.dumps(data, ensure_ascii=False)[:700]})
             rows = parse_jsonstat(data)
             if rows:
                 info = {"fetched": date.today().isoformat(), "url": url, "via": "api", "header": [],
@@ -275,6 +280,8 @@ def load_api(kod, dataset=CSU_DATASET):
             last = ValueError("API vrátilo prázdný výsledek")
         except (net.ApiError, KeyError, TypeError, ValueError, IndexError) as ex:
             last = ex
+            LAST_API["attempts"].append({"dims": dict(names), "error": f"{type(ex).__name__}: {ex}"})
+    LAST_API["error"] = f"{last}"
     raise net.ApiError(f"DataStat API nevrátilo použitelná data ({last})")
 
 
@@ -282,12 +289,26 @@ def csu_load(kod, dataset=CSU_DATASET):
     """Nejdřív rychlé API; když selže, záložní cesta přes celý soubor (může vyvolat Preparing)."""
     if not kod:
         raise ValueError("chybí kód obce")
+    api_error = None
     if USE_API:
         try:
             return load_api(kod, dataset)
-        except net.ApiError:
-            pass
-    return load_bulk(kod, dataset)
+        except net.ApiError as ex:
+            api_error = str(ex)
+    info = load_bulk(kod, dataset)
+    info["api_error"] = api_error
+    return info
+
+
+def diagnose(kod, dataset=CSU_DATASET):
+    """Podklad pro ladění: konfigurace, pokusy o API a jejich odpovědi (zkrácené)."""
+    cfg = discover(dataset)
+    try:
+        info = load_api(kod, dataset)
+        result = {"ok": True, "rows": len(info["rows"]), "sample": info["rows"][:3]}
+    except net.ApiError as ex:
+        result = {"ok": False, "error": str(ex)}
+    return {"kod": kod, "config": cfg, "result": result, "attempts": LAST_API["attempts"]}
 
 
 def fmt_num(s):
@@ -318,19 +339,22 @@ def population_card(kod):
     try:
         info = csu_load(kod)
     except Preparing:
+        why = LAST_API["error"] or "API nebylo zkoušeno"
         return card(title, SRC, "info", None,
-                    "Data ČSÚ se právě připravují: jednorázově se stahuje a zpracovává soubor za všechny obce (obvykle několik minut, "
-                    "u dalších obcí už je výsledek okamžitý). Karta se načte sama.",
-                    links=links, retry=True)
+                    "Rychlý dotaz přes DataStat API se nepovedl, proto se jednorázově stahuje a zpracovává celý soubor ČSÚ za všechny obce "
+                    "(obvykle několik minut, u dalších obcí už je výsledek okamžitý). Karta se načte sama.",
+                    links=links, notes=[f"Důvod selhání API: {why}"], retry=True)
     except (net.ApiError, ValueError, OSError, sqlite3.Error, csv.Error, StopIteration) as ex:
         return card(title, SRC, "error", None, f"Data ČSÚ se nepodařilo načíst: {ex}", links=links)
     asof = cz_date(date.fromisoformat(info["fetched"]))
     if not info["rows"]:
         return card(title, SRC, "warn", asof,
-                    f"V souboru ČSÚ nebyly pro kód obce {kod} nalezeny řádky. Zkontrolujte sloupce: "
-                    f"územní = {', '.join(info['territory_columns']) or 'žádný nenalezen'}.",
-                    links=links, notes=["Struktura souboru nebyla ověřena naživo; sloupce se poznávají podle hlavičky."])
+                    f"Pro kód obce {kod} nebyly v datech ČSÚ nalezeny žádné řádky. Záložní soubor: územní sloupce = "
+                    f"{', '.join(info['territory_columns']) or 'žádný nenalezen'}; hlavička = {', '.join(info.get('header', [])[:10])}.",
+                    links=links, notes=["Struktura souboru nebyla ověřena naživo; sloupce se poznávají podle hlavičky.",
+                                        f"Důvod selhání rychlého API: {info.get('api_error') or 'neznámý'}"])
     return card(title, SRC, "info", asof,
                 f"Posledních {CSU_YEARS} let podle sady {CSU_DATASET}. Sloupce = kombinace dalších dimenzí sady.",
                 [csu_table_block(info)], links,
-                ["EXPERIMENTÁLNÍ: sloupce CSV jsou rozpoznávány heuristicky. Hodnoty před použitím porovnejte s oficiální tabulkou na webu ČSÚ."])
+                [f"Kód obce v dotazu: {kod} (z ARES). Zdroj: {'DataStat API' if info.get('via') == 'api' else 'záložní soubor CSV'}.",
+                 "EXPERIMENTÁLNÍ: struktura dat nebyla ověřena naživo. Hodnoty před použitím porovnejte s oficiální tabulkou na webu ČSÚ."])
