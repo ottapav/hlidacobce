@@ -1,5 +1,5 @@
 """Sestavení karet pro jednotlivé záložky. Každá záložka se načítá až na vyžádání (jednorázově)."""
-from . import ares, contracts, csu, net, schools, sources, webcheck
+from . import ares, contracts, csu, elections, funding, net, schools, sources, webcheck
 from .cards import card, kv, today_str
 from .util import cz_date, norm_ico
 
@@ -35,6 +35,7 @@ def tab_obec(ico):
     except net.ApiError as ex:
         out.append(_err("Základní údaje (ARES)", "ARES", ex))
     out += contracts.contract_cards(ico, months=12, note=contracts.OBEC_NOTE)
+    out += [funding.subsidy_card(ico), funding.tender_card(ico)]
     out += webcheck.web_cards_for_ico(ico, "obec", name)
     out += sources.obec_link_cards(ico)
     return {"cards": out}
@@ -46,7 +47,7 @@ def tab_csu(ico):
         b = ares.basic(ico)
     except net.ApiError as ex:
         return {"cards": [_err("Základní údaje (ARES)", "ARES", ex)]}
-    cards_ = [csu.population_card(b["kod_obce"])] + sources.csu_link_cards()
+    cards_ = [elections.election_card(b["kod_obce"]), csu.population_card(b["kod_obce"])] + sources.csu_link_cards()
     return {"cards": cards_}
 
 
@@ -72,5 +73,6 @@ def tab_school(kind, ico):
         out.append(_err("Základní údaje (ARES)", "ARES", ex))
     out += webcheck.web_cards_for_ico(ico, kind, name)
     out += contracts.contract_cards(ico, months=12, compact=True, note=contracts.SCHOOL_NOTE)
+    out += [funding.subsidy_card(ico), funding.tender_card(ico)]
     out += sources.school_link_cards(kind)
     return {"cards": out}

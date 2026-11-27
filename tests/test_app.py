@@ -8,7 +8,7 @@ import urllib.request
 os.environ["HLIDACOBCE_CACHE"] = tempfile.mkdtemp()
 os.environ["HLIDAC_TOKEN"] = "demo-token"
 
-from hlidacobce import contracts, csu, demo, net, schools, server, tabs, webcheck  # noqa: E402
+from hlidacobce import contracts, csu, demo, elections, funding, net, schools, server, tabs, webcheck  # noqa: E402
 
 
 class Base(unittest.TestCase):
@@ -73,6 +73,51 @@ class TestModules(Base):
         finally:
             net.open_stream = orig
             os.replace(db + ".bak", db)
+
+    def test_elections_chart(self):
+        c = elections.election_card(demo.KOD_OBCE)
+        self.assertEqual(c["status"], "info")
+        chart = c["blocks"][0]
+        self.assertEqual((chart["type"], chart["stacked"], chart["categories"]), ("bars", True, ["2018", "2022", "2026"]))
+        voted, non = chart["series"][0]["values"], chart["series"][1]["values"]
+        self.assertEqual(voted, [1010, 1180, 1240])
+        self.assertEqual(non, [890, 770, 770])  # zapsaní (1900, 1950, 2010) minus volilo
+        self.assertEqual([r[0] for r in c["blocks"][1]["rows"]], ["2018", "2022", "2026"])
+        self.assertEqual(c["blocks"][1]["rows"][2][4]["text"], "61.7 %")
+        parties = c["blocks"][-1]["rows"]
+        self.assertEqual(parties[0][0], "Sdružení nezávislých Ukázkov")
+        self.assertNotIn("2014", " ".join(c["notes"]))  # rok, kdy se volby nekonaly/neexistují, není chyba
+
+    def test_elections_unknown_obec_and_bad_xml(self):
+        self.assertEqual(elections.election_card("123456")["status"], "warn")
+        self.assertEqual(elections.election_card("")["status"], "error")
+        import io
+        self.assertIsNone(elections.parse_result(io.BytesIO(b"<a><b x='1'/></a>")))
+
+    def test_subsidies_and_tenders(self):
+        c = funding.subsidy_card(demo.OBEC_ICO)
+        self.assertEqual(c["status"], "info")
+        self.assertEqual(c["blocks"][0]["rows"][0], ["Počet dotací", "6"])
+        self.assertEqual(c["blocks"][0]["rows"][2][1].replace("\xa0", " "), "6 400 000 Kč")
+        by_year = c["blocks"][1]
+        self.assertEqual((by_year["type"], by_year["categories"]), ("bars", ["2019", "2020", "2021", "2022", "2023"]))
+        self.assertEqual(by_year["series"][0]["values"][-1], 750000.0)
+        self.assertEqual(c["blocks"][3]["rows"][0][1], "Kanalizace Ukázkov")
+        t = funding.tender_card(demo.OBEC_ICO)  # první cesta v demo vrací 404 -> použije se záložní
+        self.assertEqual(t["blocks"][0]["rows"][0], ["Počet zakázek", "4"])
+        self.assertEqual(t["blocks"][-1]["rows"][0][1]["text"], "Stavební úpravy ZŠ")  # nejnovější první
+        self.assertEqual(funding.subsidy_card("55555555")["status"], "warn")
+
+    def test_funding_without_token(self):
+        old = os.environ.pop("HLIDAC_TOKEN")
+        try:
+            self.assertEqual(funding.subsidy_card(demo.OBEC_ICO)["status"], "error")
+            self.assertEqual(funding.tender_card(demo.OBEC_ICO)["status"], "error")
+        finally:
+            os.environ["HLIDAC_TOKEN"] = old
+
+    def test_find_first_nested(self):
+        self.assertEqual(funding.find_first({"a": {"B": [{"castka": 5}]}}, ["x", "castka"]), 5)
 
     def test_csu_api(self):
         info = csu.csu_load(demo.KOD_OBCE)

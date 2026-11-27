@@ -69,6 +69,18 @@ def fake_json(url, data):
                         "UZ5ALLOKR": {"category": {"index": [KOD_OBCE], "label": {KOD_OBCE: "Ukázkov"}}},
                         "CasRB": {"category": {"index": years, "label": {y: y for y in years}}}},
                     "value": [1000 + 10 * i + (i % 7) for i in range(60)]}
+    if "hlidacstatu.cz" in path.netloc and ("/Dotace/" in path.path or "/Zakazky/" in path.path or "/VerejneZakazky/" in path.path):
+        from . import net
+        q = urllib.parse.parse_qs(path.query)
+        m = re.search(r"(\d{8})", q.get("dotaz", [""])[0])
+        ico = m.group(1) if m else ""
+        if "/VerejneZakazky/" in path.path:  # ukázka záložní cesty: první varianta neexistuje
+            raise net.ApiError("HTTP 404", 404)
+        page = int(q.get("strana", ["1"])[0])
+        items = (_subsidies() if "/Dotace/" in path.path else _tenders()) if ico in (OBEC_ICO, SKOLA_ICO) else []
+        if ico == SKOLA_ICO:
+            items = items[:1]
+        return {"total": len(items), "results": items if page == 1 else []}
     if "hlidacstatu.cz" in path.netloc:
         q = urllib.parse.parse_qs(path.query)
         page = int(q.get("strana", ["1"])[0])
@@ -99,6 +111,25 @@ def _obec_contracts():
         c(9, 25, 2, 85_000, "Kopírovací služby", "66666666", "Kopírka s.r.o."),
         c(10, 10, 0, 4_300_000, "Zateplení budovy ZŠ", "22222222", "Nová Stavební a.s."),
     ]
+
+
+def _subsidies():
+    rows = [(2019, 250_000, "Obnova kulturní památky", "Program obnovy památek", "Ministerstvo kultury"),
+            (2020, 1_200_000, "Rekonstrukce školní jídelny", "OP Životní prostředí", "SFŽP"),
+            (2021, 800_000, "Hřiště u školy", "Program rozvoje venkova", "Ministerstvo pro místní rozvoj"),
+            (2022, 3_400_000, "Kanalizace Ukázkov", "IROP", "Ministerstvo pro místní rozvoj"),
+            (2023, 600_000, "Veřejné osvětlení", "Modernizační fond", "SFŽP"),
+            (2023, 150_000, "Obecní knihovna", "Podpora knihoven", "Ministerstvo kultury")]
+    return [{"id": f"d{i}", "prijemce": {"ico": OBEC_ICO, "obchodniJmeno": "Obec Ukázkov"}, "rokRozhodnuti": y, "castkaSchvalena": a,
+             "nazevProjektu": n, "dotacniProgram": pr, "poskytovatel": po} for i, (y, a, n, pr, po) in enumerate(rows)]
+
+
+def _tenders():
+    return [{"id": f"z{i}", "nazevZakazky": n, "datumUverejneni": _d(d), "konecnaHodnotaBezDph": v, "stav": st,
+             "dodavatele": [{"nazev": sup}] if sup else [], "url": f"https://www.hlidacstatu.cz/verejnezakazky/demo{i}"}
+            for i, (n, d, v, st, sup) in enumerate([
+                ("Stavební úpravy ZŠ", 60, 4_200_000, "Zadáno", "Nová Stavební a.s."), ("Svoz odpadu", 200, 950_000, "Zadáno", "Odpady s.r.o."),
+                ("Nákup traktoru", 400, None, "Zahájeno", ""), ("Oprava mostu", 700, 7_800_000, "Zadáno", "Mosty a.s.")])]
 
 
 def _school_contracts():
@@ -137,7 +168,22 @@ XML = f"""<?xml version="1.0" encoding="utf-8"?>
 """.encode("utf-8")
 
 
+def _vysledky_obec(year, kod):
+    from . import net
+    if kod != KOD_OBCE or year not in (2018, 2022, 2026):
+        raise net.ApiError("HTTP 404", 404)
+    reg, voted = {2018: (1900, 1010), 2022: (1950, 1180), 2026: (2010, 1240)}[year]
+    return (f'<?xml version="1.0" encoding="utf-8"?><KV_VYSLEDKY_OBEC xmlns="http://www.volby.cz/kv/"><OBEC CIS_OBEC="{kod}" NAZ_OBEC="Ukázkov">'
+            f'<UCAST OKRSKY_CELKEM="2" ZAPSANI_VOLICI="{reg}" VYDANE_OBALKY="{voted}" UCAST_PROC="{100 * voted / reg:.2f}" ODEVZDANE_OBALKY="{voted}" PLATNE_HLASY="{voted * 8}"/>'
+            '<STRANA KSTRANA="1" NAZ_STR="Sdružení nezávislých Ukázkov" HLASY="5200" MANDATY="5"/>'
+            '<STRANA KSTRANA="2" NAZ_STR="Občané pro Ukázkov" HLASY="3100" MANDATY="3"/>'
+            '<STRANA KSTRANA="3" NAZ_STR="Zelení" HLASY="900" MANDATY="1"/></OBEC></KV_VYSLEDKY_OBEC>').encode("utf-8")
+
+
 def fake_stream(url):
+    mv = re.search(r"/kv(\d{4})/vysledky_obec\?cislo_obce=(\d+)", url)
+    if mv:
+        return io.BytesIO(_vysledky_obec(int(mv.group(1)), mv.group(2)))
     if "data.csu.gov.cz" in url:
         return io.BytesIO(CSV.encode("utf-8"))
     if "rejstriky.msmt.cz" in url:

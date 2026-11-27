@@ -3,7 +3,7 @@
 Karta = jeden zdroj údajů:
   {"title", "source", "status", "asof", "intro", "blocks": [...], "links": [{"text","url"}], "notes": [...], "retry": bool}
 status: ok | warn | info | link | error
-Bloky: heading, text, list, kv, table. Buňka tabulky je text nebo {"text", "url"} či {"text", "align"}.
+Bloky: heading, text, list, kv, table, bars (sloupcový graf, kreslí klient jako SVG). Buňka tabulky je text nebo {"text", "url"} či {"text", "align"}.
 """
 from datetime import date
 
@@ -54,3 +54,9 @@ def cell_link(text_, url):
 
 def cell_right(text_):
     return {"text": text_, "align": "right"}
+
+
+def bars(title, categories, series, stacked=False, unit=""):
+    """Sloupcový graf. series = [(název, [hodnoty pro každou kategorii])]; stacked=True skládá série na sebe (součet = celek)."""
+    return {"type": "bars", "title": title, "categories": [str(c) for c in categories], "stacked": bool(stacked), "unit": unit,
+            "series": [{"name": n, "values": [None if v is None else float(v) for v in vals]} for n, vals in series]}

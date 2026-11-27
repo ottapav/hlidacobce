@@ -34,8 +34,71 @@
       if (c.url) td.appendChild(link(c.text, c.url)); else td.textContent = c.text;
     } else td.textContent = c == null ? "" : String(c);
   }
+  var NS = "http://www.w3.org/2000/svg";
+  function sv(tag, attrs, txt) {
+    var e = document.createElementNS(NS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    if (txt !== undefined) e.textContent = txt;
+    return e;
+  }
+  function fmt(n) { return Math.round(n).toLocaleString("cs-CZ"); }
+  function compact(n) {
+    if (n >= 1e6) return (n / 1e6).toLocaleString("cs-CZ", { maximumFractionDigits: 1 }) + " mil.";
+    if (n >= 1e4) return (n / 1e3).toLocaleString("cs-CZ", { maximumFractionDigits: 0 }) + " tis.";
+    return fmt(n);
+  }
+  function barsBlock(b) {
+    var W = 600, H = 300, L = 62, R = 12, T = 28, B = 42, pw = W - L - R, ph = H - T - B, n = b.categories.length;
+    var totals = b.categories.map(function (_, i) {
+      return b.stacked ? b.series.reduce(function (a, s) { return a + (s.values[i] || 0); }, 0)
+                       : Math.max.apply(null, b.series.map(function (s) { return s.values[i] || 0; }));
+    });
+    var max = Math.max.apply(null, totals.concat([1])), band = pw / n, bw = Math.min(band * 0.6, 90);
+    var wrap = el("div", "chart");
+    if (b.title) wrap.appendChild(el("h3", null, b.title));
+    var svg = sv("svg", { viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": b.title || "Graf" });
+    var desc = b.categories.map(function (c, i) {
+      return c + ": " + b.series.map(function (s) { return s.name + " " + fmt(s.values[i] || 0); }).join(", ");
+    }).join("; ");
+    svg.appendChild(sv("title", {}, b.title || "Graf"));
+    svg.appendChild(sv("desc", {}, desc));
+    [0, 0.5, 1].forEach(function (f) {
+      var y = T + ph - ph * f;
+      svg.appendChild(sv("line", { x1: L, x2: W - R, y1: y, y2: y, class: "ax" }));
+      svg.appendChild(sv("text", { x: L - 6, y: y + 4, "text-anchor": "end" }, compact(max * f)));
+    });
+    b.categories.forEach(function (c, i) {
+      var cx = L + band * i + band / 2, x = cx - bw / 2, base = T + ph;
+      svg.appendChild(sv("text", { x: cx, y: H - 18, "text-anchor": "middle" }, c));
+      var series = b.stacked ? b.series : [b.series[0]];
+      var acc = 0;
+      series.forEach(function (s, k) {
+        var v = s.values[i] || 0, h = ph * v / max, y = b.stacked ? base - ph * (acc + v) / max : base - h;
+        acc += v;
+        if (h <= 0) return;
+        var r = sv("rect", { x: x, y: y, width: bw, height: h, class: "seg" + Math.min(k, 2) });
+        r.appendChild(sv("title", {}, c + " – " + s.name + ": " + fmt(v) + (b.unit ? " " + b.unit : "")));
+        svg.appendChild(r);
+        if (h >= 18) svg.appendChild(sv("text", { x: cx, y: y + h / 2 + 4, "text-anchor": "middle", class: "lbl" + Math.min(k, 2) }, b.stacked ? fmt(v) : compact(v)));
+      });
+      svg.appendChild(sv("text", { x: cx, y: base - ph * totals[i] / max - 6, "text-anchor": "middle", class: "tot" }, b.stacked ? fmt(totals[i]) : ""));
+    });
+    wrap.appendChild(svg);
+    if (b.stacked || b.series.length > 1) {
+      var lg = el("div", "legend");
+      b.series.forEach(function (s, k) {
+        var item = el("span"), sw = el("i", "seg" + Math.min(k, 2));
+        item.appendChild(sw); item.appendChild(document.createTextNode(s.name));
+        lg.appendChild(item);
+      });
+      if (b.stacked) lg.appendChild(el("span", null, "Číslo nad sloupcem = celkem"));
+      wrap.appendChild(lg);
+    }
+    return wrap;
+  }
   function block(b) {
     var d;
+    if (b.type === "bars") return barsBlock(b);
     if (b.type === "heading") return el("h3", null, b.text);
     if (b.type === "text") return el("p", null, b.text);
     if (b.type === "list") { d = el("ul"); b.items.forEach(function (i) { d.appendChild(el("li", null, i)); }); return d; }
