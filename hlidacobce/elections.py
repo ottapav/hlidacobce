@@ -1,8 +1,10 @@
 """Výsledky voleb do zastupitelstev obcí (volby.cz, ČSÚ): účast voličů v čase jako graf.
 
 Zdroj: otevřená data volby.cz, XML „výsledky jednoho zastupitelstva“ (https://www.volby.cz/pls/kvRRRR/vysledky_obec?cislo_obce=KOD,
-dokumentace KV2022_XML). Názvy atributů (ZAPSANI_VOLICI, ODEVZDANE_OBALKY, PLATNE_HLASY…) jsou převzaty ze zavedené konvence
-volby.cz, ale přesné schéma XSD jsem neověřil, proto je čtení tolerantní. Kód zastupitelstva = kód obce (u měst s obvody se liší).
+dokumentace KV2022_XML).
+Struktura ověřena naživo (Velký Osek 2018 a 2022): OBEC > VYSLEDEK > UCAST (ZAPSANI_VOLICI, VYDANE_OBALKY, ODEVZDANE_OBALKY, PLATNE_HLASY)
+a VOLEBNI_STRANA (NAZEV_STRANY, HLASY). Bez parametru datumvoleb server vrací jen „aktuální volby“, proto se zadává první den voleb.
+Čtení je přesto tolerantní (u atributů s mandáty jsem přesný název neověřil). Kód zastupitelstva = kód obce (u měst s obvody se liší).
 """
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
@@ -56,10 +58,10 @@ def parse_result(stream):
         a = {k.upper(): v for k, v in el.attrib.items()}
         nm = next((a[k] for k in ("NAZ_STR", "NAZEV_STRANY", "NAZEV_STR", "NAZEV") if a.get(k)), None)
         mk = next((k for k in a if "MANDAT" in k), None)
-        if not nm or not mk:
-            continue
         hk = next((k for k in a if "HLAS" in k and "PROC" not in k), None)
-        row = {"name": nm, "votes": _num(a.get(hk)) if hk else None, "mandates": _num(a[mk])}
+        if not nm or not (mk or hk):
+            continue
+        row = {"name": nm, "votes": _num(a.get(hk)) if hk else None, "mandates": _num(a[mk]) if mk else None}
         old = parties.get(nm)
         if not old or (row["votes"] or 0) > (old["votes"] or 0):
             parties[nm] = row
@@ -99,7 +101,7 @@ def election_card(kod):
         return card(title, SRC, "warn", today_str(),
                     "Výsledky voleb pro tuto obec se nepodařilo načíst." + (" Důvody: " + "; ".join(problems) + "." if problems else
                                                                           " Obec nemusí mít volby v nabízených ročnících nebo má kód zastupitelstva jiný než kód obce."),
-                    links=links, notes=["Formát XML jsem naživo neověřil."])
+                    links=links)
     cats = [str(y) for y, _ in data]
     voted = [d["voted"] for _, d in data]
     non = [max(d["registered"] - d["voted"], 0) for _, d in data]
@@ -108,13 +110,14 @@ def election_card(kod):
     blocks = [bars("Zapsaní voliči: kolik z nich volilo a kolik ne", cats, [("Volilo", voted), ("Nevolilo", non)], stacked=True, unit="voličů"),
               table(["Volby", "Zapsaných voličů", "Volilo", "Nevolilo", "Účast"], rows)]
     y, last = data[-1]
-    parties = sorted([p for p in last["parties"] if p["mandates"] is not None], key=lambda p: (-(p["mandates"] or 0), -(p["votes"] or 0)))
+    parties = sorted(last["parties"], key=lambda p: (-(p["mandates"] or 0), -(p["votes"] or 0)))
     if parties:
-        blocks += [heading(f"Volby {y}: mandáty"),
+        blocks += [heading(f"Volby {y}: kandidátky"),
                    table(["Volební strana / kandidátka", "Hlasů", "Mandátů"],
-                         [[p["name"], cell_right("–" if p["votes"] is None else thousands(p["votes"])), cell_right(str(p["mandates"]))] for p in parties[:15]])]
+                         [[p["name"], cell_right("–" if p["votes"] is None else thousands(p["votes"])),
+                           cell_right("–" if p["mandates"] is None else str(p["mandates"]))] for p in parties[:15]])]
     notes = ["Nevolilo = zapsaní voliči minus odevzdané obálky. Zapsaní voliči jsou ti ve stálém seznamu v době voleb.",
-             "EXPERIMENTÁLNÍ: struktura XML nebyla ověřena naživo. Údaje porovnejte s volby.cz."]
+             "Účast je ověřena na živých datech volby.cz (2018, 2022); mandáty se čtou z atributů XML tolerantně. Volby 2026 zatím volby.cz v otevřených datech nenabízejí."]
     if problems:
         notes.append("Nenačteno: " + "; ".join(problems))
     return card(title, SRC, "info", today_str(), f"Voleb do zastupitelstva obce v nabízených ročnících: {len(data)}.", blocks, links, notes)

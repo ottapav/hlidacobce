@@ -94,7 +94,8 @@ def norm_tender(raw):
                                           "predpokladanaHodnota", "hodnota", "cena"])),
             "supplier": _text(find_first(raw, ["nazvyDodavatelu", "dodavatele", "vitezove", "winners", "dodavatel"])),
             "kind": _text(find_first(raw, ["druhVerejneZakazkyOriginal"])),
-            "url": next((u for u in [find_first(raw, ["zakazkaUrl", "url", "odkaz", "detailUrl"])] if isinstance(u, str) and u.startswith("http")), "")}
+            "url": next((u for u in [find_first(raw, ["zakazkaUrl", "url", "odkaz", "detailUrl"])] if isinstance(u, str) and u.startswith("http")),
+                        f"https://www.hlidacstatu.cz/verejnezakazky/{raw['id']}" if isinstance(raw, dict) and raw.get("id") else "")}
 
 
 def tender_card(ico):
@@ -129,4 +130,4 @@ def tender_card(ico):
                       for t in latest], "Hlídač státu žádné zakázky neeviduje.")]
     return card(title, SRC_Z, "info" if ts else "warn", today_str(), "Zakázky, kde je subjekt zadavatelem (podle IČO).", blocks, links,
                 ["Hodnota zakázky je často neuvedená (hlavně u malých zakázek); součty proto berte jako dolní odhad.",
-                 "Pole zakázek se čtou tolerantně; porovnejte s webem Hlídače státu."])
+                 "Pole zakázek jsou ověřena na živých datech (/VZ/Hledat); odkaz u zakázky vede na zdroj nebo na detail na Hlídači státu."])

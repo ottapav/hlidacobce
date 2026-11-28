@@ -359,6 +359,14 @@ class TestRefactor(Base):
 
 
 class TestErrors(Base):
+    def test_volby_real_structure(self):
+        xml = (b'<?xml version="1.0" encoding="utf-8"?><VYSLEDKY_OBEC xmlns="http://www.volby.cz/kv/"><OBEC KODZASTUP="533840" NAZEVZAST="Velk\xc3\xbd Osek">'
+               b'<VYSLEDEK><UCAST OKRSKY_CELKEM="1" ZAPSANI_VOLICI="1968" VYDANE_OBALKY="867" UCAST_PROC="44.05" ODEVZDANE_OBALKY="866" PLATNE_HLASY="11834"/>'
+               b'<VOLEBNI_STRANA VSTRANA="90" NAZEV_STRANY="Nez\xc3\xa1visl\xc3\xad pro Velk\xc3\xbd Osek" HLASY="6208"/></VYSLEDEK></OBEC></VYSLEDKY_OBEC>')
+        r = elections.parse_result(io.BytesIO(xml))
+        self.assertEqual((r["registered"], r["voted"], r["valid"]), (1968, 866, 11834))
+        self.assertEqual(r["parties"], [{"name": "Nezávislí pro Velký Osek", "votes": 6208, "mandates": None}])
+
     def test_volby_error_xml(self):
         xml = b'<VYSLEDKY_OBEC xmlns="http://www.volby.cz/kv/"><CHYBA>Zastupitelstvo neexistuje</CHYBA></VYSLEDKY_OBEC>'
         with self.assertRaises(elections.ResultError) as cm:
