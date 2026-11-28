@@ -13,6 +13,10 @@ from .util import thousands
 
 URL = "https://www.volby.cz/pls/kv{year}/vysledky_obec?cislo_obce={kod}"
 YEARS = (2026, 2022, 2018, 2014, 2010)
+# Bez parametru datumvoleb server vrací jen „aktuální volby“ (naživo ověřeno: chyba „V aktuálních volbách se v obci nevolí“), proto se
+# zkouší termíny voleb daného roku (první a druhý den; který z nich je v datech uveden, jsem neověřil).
+DATES = {2026: ("20261002", "20261003"), 2022: ("20220923", "20220924"), 2018: ("20181005", "20181006"),
+         2014: ("20141010", "20141011"), 2010: ("20101015", "20101016")}
 SRC = "volby.cz (Český statistický úřad)"
 
 
@@ -62,16 +66,29 @@ def parse_result(stream):
     return {"registered": reg, "voted": voted, "valid": valid, "parties": list(parties.values())}
 
 
+def result_url(year, kod, datum):
+    return URL.format(year=year, kod=kod) + (f"&datumvoleb={datum}" if datum else "")
+
+
 def _fetch(year, kod):
-    try:
-        with net.open_stream(URL.format(year=year, kod=kod), timeout=30) as r:
-            return year, parse_result(r), None
-    except net.ApiError as ex:
-        return year, None, ("nekonalo se" if ex.code in (400, 404) else str(ex))
-    except ResultError as ex:
-        return year, None, f"volby.cz vrátily chybu: {ex}"
-    except ET.ParseError:
-        return year, None, "odpověď není platné XML (volby se v obci nemusely konat)"
+    """(rok, výsledek nebo None, důvod). Zkouší termíny voleb daného roku; první, který vrátí výsledky, vyhrává."""
+    why = None
+    for datum in DATES.get(year, ()):
+        try:
+            with net.open_stream(result_url(year, kod, datum), timeout=30) as r:
+                res = parse_result(r)
+            if res:
+                return year, res, None
+            why = "v odpovědi chybí údaje o účasti"
+        except net.ApiError as ex:
+            if ex.code not in (400, 404):
+                return year, None, str(ex)
+            why = "nekonalo se"
+        except ResultError as ex:
+            why = f"volby.cz vrátily: {ex}"
+        except ET.ParseError:
+            why = "odpověď není platné XML"
+    return year, None, why
 
 
 def election_card(kod):
@@ -80,7 +97,7 @@ def election_card(kod):
              ("Dokumentace XML (KV2022)", "https://volby.gov.cz/opendata/kv2022/KV2022_XML.htm")]
     if not kod:
         return card(title, SRC, "error", None, "ARES nevrátil kód obce, výsledky voleb nelze dohledat.", links=links)
-    links.insert(1, ("XML výsledků této obce (2022)", URL.format(year=2022, kod=kod)))
+    links.insert(1, ("XML výsledků této obce (2022)", result_url(2022, kod, DATES[2022][0])))
     with ThreadPoolExecutor(max_workers=len(YEARS)) as ex:
         results = sorted(ex.map(lambda y: _fetch(y, kod), YEARS))
     data = [(y, d) for y, d, _ in results if d]

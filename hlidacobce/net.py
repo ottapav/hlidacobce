@@ -43,7 +43,7 @@ def http_json(url, headers=None, data=None, retries=3, timeout=30):
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 return json.loads(r.read().decode("utf-8"))
         except urllib.error.HTTPError as ex:
-            if ex.code in (400, 401, 403, 404):
+            if ex.code in (400, 401, 403, 404, 429):  # opakování nepomůže nebo ho řídí volající
                 raise ApiError(f"HTTP {ex.code} při volání {_host(url)}{_body_hint(ex)}", ex.code) from ex
             last = ex
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as ex:

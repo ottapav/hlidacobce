@@ -6,7 +6,7 @@ Nejdřív se zeptá na název obce, teprve potom načte data do karet. Každá k
 | Záložka | Karty |
 |---|---|
 | **Obec** | ARES (základní údaje), Registr smluv z Hlídače státu (přehled + 6 signálů ke kontrole), dotace a veřejné zakázky (Hlídač státu, graf podle let), kontrola webu obce (úřední deska, rozpočet, závěrečný účet…), odkazy na MF Monitor, koeficient daně z nemovitých věcí, sbírku vyhlášek |
-| **Škola** / **Školka** | zařízení zřizovaná obcí (Hlídač státu, záloha ARES a rejstřík MŠMT) , ARES, kontrola webu podle seznamu povinně zveřejňovaných informací (školní řád, ŠVP, úplata, kritéria přijímání, výroční zpráva, GDPR pověřenec, přístupnost…) s právní oporou, Registr smluv, dotace a zakázky, odkazy na ČŠI a rejstříky |
+| **Škola** / **Školka** | zařízení zřizovaná obcí (Hlídač státu, záloha ARES), ARES, kontrola webu podle seznamu povinně zveřejňovaných informací (školní řád, ŠVP, úplata, kritéria přijímání, výroční zpráva, GDPR pověřenec, přístupnost…) s právní oporou, Registr smluv, dotace a zakázky, odkazy na ČŠI a rejstříky |
 | **ČSÚ** | **komunální volby: graf zapsaných voličů, kolik volilo a kolik ne** (volby.cz, ročníky 2010–2026) a mandáty posledních voleb, obyvatelstvo podle pohlaví a věku (DataStat API, výběr jedné obce; záloha: celý CSV soubor), odkazy na SLDB 2021 a Registr ekonomických subjektů |
 
 ## Spuštění
@@ -40,7 +40,7 @@ Veřejná instance používá váš token Hlídače státu, proto je zapnutý li
 |---|---|
 | `net.py` | veškerý síťový přístup (JSON, streamy, stránky s ochranou proti SSRF, režim demo) |
 | `util.py`, `cards.py`, `htmlutil.py` | pomocné funkce, stavební kameny karet, čtení HTML |
-| `ares.py`, `hlidac.py`, `schools.py` | klienti zdrojů: ARES, sdílený klient Hlídače státu, školy (Hlídač → ARES → rejstřík MŠMT) |
+| `ares.py`, `hlidac.py`, `wikidata.py`, `schools.py` | klienti zdrojů: ARES, sdílený klient Hlídače státu (omezení rychlosti, opakování při 429), Wikidata (web obce podle IČO), školy (Hlídač → ARES) |
 | `contracts.py`, `funding.py`, `elections.py`, `csu.py`, `webcheck.py`, `sources.py` | jednotlivé zdroje, každý vrací karty |
 | `tabs.py` | skládá karty do záložek; každý zdroj je izolovaný (chyba jedné karty neshodí záložku) a nezávislé zdroje běží souběžně |
 | `diag.py` | samodiagnostika `/api/selftest?ico=…`: z nasazení zkusí každý externí zdroj a vrátí strukturu odpovědí (bez dat a tokenu) |
@@ -57,7 +57,7 @@ Měření dostupnosti webů v čase, upozornění na nové smlouvy od minulého 
 Vývoj proběhl bez přístupu k živým zdrojům, proto platí:
 
 - **Otestováno** na vymyšlených datech (`--demo`): logika signálů, parsery, server, rozhraní.
-- **Neověřeno naživo**: cesta a pole API Hlídače státu (`SEARCH_PATH` v `contracts.py`, pole čte tolerantně), dotaz na DataStat API (kódy dimenzí jsou z katalogu sady OBY02E, formát odpovědi JSON-stat ověřen jen na vzorku) a záložní CSV ČSÚ (sloupce se rozpoznávají podle hlavičky), cesty a pole API Hlídače státu pro dotace a zakázky (`funding.py`), názvy atributů v XML volby.cz (adresa a parametry jsou z oficiální dokumentace KV2022, schéma XSD ne), struktura XML rejstříku škol MŠMT, odpovědi ARES. Když něco nesedí, karta ukáže chybu a odkaz na zdroj; nic se nezadává ručně: školy i adresy webů se zjišťují z registrů.
+- **Neověřeno naživo**: cesta a pole API Hlídače státu (`SEARCH_PATH` v `contracts.py`, pole čte tolerantně), dotaz na DataStat API (kódy dimenzí jsou z katalogu sady OBY02E, formát odpovědi JSON-stat ověřen jen na vzorku) a záložní CSV ČSÚ (sloupce se rozpoznávají podle hlavičky), cesty a pole API Hlídače státu pro dotace a zakázky (`funding.py`), názvy atributů v XML volby.cz (adresa a parametry jsou z oficiální dokumentace KV2022, schéma XSD ne), termíny voleb pro volby.cz (parametr `datumvoleb`) a cesta k veřejným zakázkám Hlídače státu. Když něco nesedí, karta ukáže chybu a odkaz na zdroj; nic se nezadává ručně: školy i adresy webů se zjišťují z registrů.
 - **Kontrola webu je heuristika**: hledá klíčová slova v textu a odkazech. „Nenalezeno“ neznamená „nezveřejněno“ (web může být generovaný JavaScriptem, dokumenty mohou být jinde).
 - **Právní opory jsou orientační**, nejde o právní poradenství. Před jakýmkoli závěrem ověřte znění předpisů.
 - Registr smluv neobsahuje smlouvy do 50 000 Kč a obce do 3 000 obyvatel mají výjimku; u škol se povinnost týká jen zřizovaných ORP nebo krajem.
@@ -65,4 +65,4 @@ Vývoj proběhl bez přístupu k živým zdrojům, proto platí:
 
 ## Zdroje
 
-ARES (MF), Hlídač státu, ČSÚ DataStat, rejstřík škol MŠMT, odkazy na MF Monitor, Finanční správu, Sbírku právních předpisů ÚSC (MV), ČŠI.
+ARES (MF), Hlídač státu, ČSÚ DataStat, Wikidata, odkazy na MF Monitor, Finanční správu, Sbírku právních předpisů ÚSC (MV), ČŠI.

@@ -7,7 +7,8 @@ from datetime import date, timedelta
 OBEC_ICO = "00100001"
 SKOLA_ICO = "70000001"
 KOD_OBCE = "999999"
-WEBS = {OBEC_ICO: "https://obec.demo/", SKOLA_ICO: "https://skola.demo"}  # adresy webů, jak je uvádí Hlídač státu
+WEBS = {OBEC_ICO: "https://obec.demo/", SKOLA_ICO: "https://skola.demo"}  # odkazy na webové stránky na stránce subjektu na Hlídači státu
+WIKIDATA = {OBEC_ICO: "http://obec.demo/", "00100002": "http://down.demo/"}  # P856 podle IČO (P4156)
 
 
 def _d(days):
@@ -69,6 +70,10 @@ def fake_json(url, data):
                         "UZ5ALLOKR": {"category": {"index": [KOD_OBCE], "label": {KOD_OBCE: "Ukázkov"}}},
                         "CasRB": {"category": {"index": years, "label": {y: y for y in years}}}},
                     "value": [1000 + 10 * i + (i % 7) for i in range(60)]}
+    if "wikidata.org" in path.netloc:
+        m = re.search(r'P4156\s+"(\d{8})"', urllib.parse.parse_qs(path.query).get("query", [""])[0])
+        web = WIKIDATA.get(m.group(1)) if m else None
+        return {"results": {"bindings": [{"web": {"type": "uri", "value": web}}] if web else []}}
     if "hlidacstatu.cz" in path.netloc and ("/Dotace/" in path.path or "/Zakazky/" in path.path or "/VerejneZakazky/" in path.path):
         from . import net
         q = urllib.parse.parse_qs(path.query)
@@ -146,32 +151,16 @@ CSV = ("hodnota,pohlavi_txt,vek_txt,rok,uzemi_kod,uzemi_txt\n" +
        "7,muži,0–14,2024,111111,Jinde\n"
        f",muži,0–14,2024,{KOD_OBCE},Ukázkov\n")  # prázdná hodnota se nesmí zobrazit
 
-XML = f"""<?xml version="1.0" encoding="utf-8"?>
-<VREJ>
-  <PravnickaOsoba>
-    <RedIzo>600000001</RedIzo><ICO>{SKOLA_ICO}</ICO>
-    <RedPlnyNazev>Základní škola a mateřská škola Ukázkov, příspěvková organizace</RedPlnyNazev>
-    <WWW>https://skola.demo</WWW>
-    <Zrizovatele><Zrizovatel><ZrizICO>{OBEC_ICO}</ZrizICO><ZrizNazev>Obec Ukázkov</ZrizNazev></Zrizovatel></Zrizovatele>
-    <SkolyZarizeni>
-      <SkolaZarizeni><SkolaDruhTyp>Základní škola</SkolaDruhTyp><SkolaPlnyNazev>Základní škola Ukázkov</SkolaPlnyNazev></SkolaZarizeni>
-      <SkolaZarizeni><SkolaDruhTyp>Mateřská škola</SkolaDruhTyp><SkolaPlnyNazev>Mateřská škola Ukázkov</SkolaPlnyNazev></SkolaZarizeni>
-    </SkolyZarizeni>
-  </PravnickaOsoba>
-  <PravnickaOsoba>
-    <RedIzo>600000002</RedIzo><ICO>70000002</ICO>
-    <RedPlnyNazev>Mateřská škola Jinde</RedPlnyNazev>
-    <Zrizovatele><Zrizovatel><ZrizICO>99999999</ZrizICO></Zrizovatel></Zrizovatele>
-    <SkolyZarizeni><SkolaZarizeni><SkolaDruhTyp>Mateřská škola</SkolaDruhTyp><SkolaPlnyNazev>Mateřská škola Jinde</SkolaPlnyNazev></SkolaZarizeni></SkolyZarizeni>
-  </PravnickaOsoba>
-</VREJ>
-""".encode("utf-8")
+VOLBY_DATA = {2018: "20181006", 2022: "20220923", 2026: "20261002"}  # datumvoleb, pro které demo vrací výsledky (jinak chybové XML jako volby.cz)
 
 
-def _vysledky_obec(year, kod):
+def _vysledky_obec(year, kod, datum=""):
     from . import net
-    if kod != KOD_OBCE or year not in (2018, 2022, 2026):
+    if year not in VOLBY_DATA:
         raise net.ApiError("HTTP 404", 404)
+    if kod != KOD_OBCE or datum != VOLBY_DATA[year]:
+        return ('<?xml version="1.0" encoding="utf-8"?><VYSLEDKY_OBEC xmlns="http://www.volby.cz/kv/">'
+                '<CHYBA>V aktuálních volbách se v obci nevolí</CHYBA></VYSLEDKY_OBEC>').encode("utf-8")
     reg, voted = {2018: (1900, 1010), 2022: (1950, 1180), 2026: (2010, 1240)}[year]
     return (f'<?xml version="1.0" encoding="utf-8"?><KV_VYSLEDKY_OBEC xmlns="http://www.volby.cz/kv/"><OBEC CIS_OBEC="{kod}" NAZ_OBEC="Ukázkov">'
             f'<UCAST OKRSKY_CELKEM="2" ZAPSANI_VOLICI="{reg}" VYDANE_OBALKY="{voted}" UCAST_PROC="{100 * voted / reg:.2f}" ODEVZDANE_OBALKY="{voted}" PLATNE_HLASY="{voted * 8}"/>'
@@ -181,13 +170,11 @@ def _vysledky_obec(year, kod):
 
 
 def fake_stream(url):
-    mv = re.search(r"/kv(\d{4})/vysledky_obec\?cislo_obce=(\d+)", url)
+    mv = re.search(r"/kv(\d{4})/vysledky_obec\?cislo_obce=(\d+)(?:&datumvoleb=(\d+))?", url)
     if mv:
-        return io.BytesIO(_vysledky_obec(int(mv.group(1)), mv.group(2)))
+        return io.BytesIO(_vysledky_obec(int(mv.group(1)), mv.group(2), mv.group(3) or ""))
     if "data.csu.gov.cz" in url:
         return io.BytesIO(CSV.encode("utf-8"))
-    if "rejstriky.msmt.cz" in url:
-        return io.BytesIO(XML)
     raise ValueError(f"demo: neznámý soubor {url}")
 
 
@@ -202,15 +189,15 @@ def fake_page(url):
     if host == "www.hlidacstatu.cz":
         ms = re.fullmatch(r"/[Ss]ubjekt/(\d{8})", path)
         if ms and ms.group(1) in WEBS:
-            body = ('<div class="odkazy"><span>Webová stránka</span> '
-                    f'<a href="{WEBS[ms.group(1)]}">{WEBS[ms.group(1)]}</a> '
+            body = ('<div class="odkazy"> '
+                    f'<a href="{WEBS[ms.group(1)]}"><img src="/ikona.png"></a> '
                     '<a href="https://www.youtube.com/playlist?list=x">Záznamy zastupitelstva</a> '
                     '<a href="https://www.saleskit.com/cs">Vyzkoušejte SalesKit</a></div>')
             return url, _html("Subjekt", body)
         if ms and ms.group(1) == "70000005":  # popisek je, ale web patří jinému subjektu
-            return url, _html("Subjekt", '<span>Webová stránka</span> <a href="https://other.demo/">https://other.demo/</a>')
+            return url, _html("Subjekt", '<a href="https://other.demo/"><img src="/ikona.png"></a>')
         if ms and ms.group(1) == "70000006":  # dva různé weby
-            return url, _html("Subjekt", '<span>Webová stránka</span> <a href="https://a.demo/">a</a> <span>Webová stránka</span> <a href="https://b.demo/">b</a>')
+            return url, _html("Subjekt", '<a href="https://a.demo/">a</a> <a href="https://b.demo/">b</a>')
         if ms:  # jen reklama a odkaz bez popisku
             return url, _html("Subjekt", '<a href="https://www.saleskit.com/cs">SalesKit</a> <span>Zdroj</span> <a href="https://random.demo/">odkaz</a>')
         m = re.fullmatch(r"/subjekt/Vazby/(\d{8})", path)

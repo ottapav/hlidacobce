@@ -6,7 +6,7 @@ Je to heuristika: hledá klíčová slova v textu stránek a odkazů. "Nenalezen
 import re
 import time
 import urllib.parse
-from . import net
+from . import net, wikidata
 from .cards import card, cell_link, table, today_str
 from .htmlutil import parse_html
 from .util import fold
@@ -16,7 +16,7 @@ SRC = "Web organizace (jednorázová kontrola)"
 SLOW_MS = 3000
 HLIDAC_SUBJEKT = "https://www.hlidacstatu.cz/subjekt/{ico}"
 # odkazy, které nejsou web samotného subjektu (sociální sítě, mapy, rejstříky…)
-NOT_SITE = re.compile(r"(^|\.)(hlidacstatu\.cz|youtube\.com|youtu\.be|facebook\.com|twitter\.com|x\.com|instagram\.com|linkedin\.com|"
+NOT_SITE = re.compile(r"(^|\.)(hlidacstatu\.cz|saleskit\.com|ipinfo\.io|wikidata\.org|youtube\.com|youtu\.be|facebook\.com|twitter\.com|x\.com|instagram\.com|linkedin\.com|"
                       r"google\.[a-z.]+|mapy\.cz|github\.com|justice\.cz|ares\.gov\.cz|wikipedia\.org|czso\.cz|csu\.gov\.cz)$", re.I)
 
 # (id, název, regulární výraz nad textem bez diakritiky, právní opora)
@@ -61,9 +61,9 @@ FOLLOW = re.compile(r"rad|program|uplat|zapis|kriter|zprava|dokument|informac|gd
                     r"kontakt|povinn|vyhled|ucet|vyhlask|usneseni|poradens|ke-stazeni|download|o-skole|o-obci", re.I)
 
 
-LABEL = re.compile(r"webov\w* stran|oficialni web|internetov\w* stran|^web:?$|^www:?$")
 GENERIC = {"obec", "mesto", "mestys", "statutarni", "zakladni", "skola", "materska", "prispevkova", "organizace", "okres", "a", "s", "r", "o", "p",
            "ms", "zs", "skolka", "ceska", "republika", "praha"}
+MAX_CANDIDATES = 3
 
 
 def name_tokens(name):
@@ -80,41 +80,67 @@ def _bare_host(url):
     return (urllib.parse.urlparse(url).hostname or "").lower().removeprefix("www.")
 
 
+def _candidates(ico):
+    """Kandidáti na web: {holý host: (url, důvěryhodný)}. Zdroje: Wikidata podle IČO (důvěryhodné, shoda podle identifikátoru) a odkazy
+    na stránce subjektu na Hlídači státu (bez popisků; mimo sociální sítě, reklamy a poskytovatele dat). Vrací (kandidáti, chyby zdrojů)."""
+    cands, errors = {}, []
+    try:
+        for url in wikidata.websites_by_ico(ico):
+            if re.match(r"^https?://", url, re.I) and not NOT_SITE.search(_bare_host(url)):
+                cands.setdefault(_bare_host(url), (url, True))
+    except (net.ApiError, KeyError, TypeError, ValueError) as ex:
+        errors.append(f"Wikidata: {ex}")
+    try:
+        _, html = net.fetch_page(HLIDAC_SUBJEKT.format(ico=ico))
+        for href, _label in parse_html(html).links:
+            host = _bare_host(href) if re.match(r"^https?://", href or "", re.I) else ""
+            if host and not NOT_SITE.search(host):
+                old = cands.get(host)
+                if not old:
+                    cands[host] = (href, False)
+                elif old[0].lower().startswith("http://") and href.lower().startswith("https://"):
+                    cands[host] = (href, old[1])  # stejný web, preferujeme https
+    except (net.ApiError, ValueError) as ex:
+        errors.append(f"Hlídač státu: {ex}")
+    return cands, errors
+
+
 def find_site(ico, name):
     """Spolehlivě zjistí web subjektu, nebo řekne, proč ne. Vrací dict {status, url, candidate, reason}.
 
-    Web se přijme jen když (1) ho Hlídač státu uvádí s popiskem „Webová stránka“ (ne jakýkoli odkaz na stránce, ty bývají reklamy,
-    sociální sítě apod.), (2) je takový odkaz právě jeden a (3) úvodní stránka webu obsahuje rozlišující slovo z názvu subjektu
-    (nebo jeho IČO). Jinak se web nepřiřadí a uživatel dostane vysvětlení."""
-    _, html = net.fetch_page(HLIDAC_SUBJEKT.format(ico=ico))
-    page = parse_html(html)
-    cands = []
-    for (href, label), prev in zip(page.links, page.link_prev):
-        if not re.match(r"^https?://", href or "", re.I):
-            continue
-        host = (urllib.parse.urlparse(href).hostname or "").lower()
-        if not host or NOT_SITE.search(host):
-            continue
-        if LABEL.search(fold(prev)) or LABEL.search(fold(label)):
-            cands.append(href)
-    hosts = {_bare_host(u) for u in cands}
+    Kandidáty viz `_candidates`. Přijme se jen web, na jehož úvodní stránce je rozlišující slovo z názvu subjektu nebo jeho IČO,
+    a to právě jeden. Víc potvrzených různých webů = nejednoznačné, žádný potvrzený = nepřiřadí se. Nedostupný web se hlásí jako chyba
+    jen tehdy, když pochází z důvěryhodného zdroje (Wikidata podle IČO)."""
+    cands, errors = _candidates(ico)
     if not cands:
-        return {"status": "none", "url": None, "candidate": None, "reason": "Hlídač státu u subjektu neuvádí odkaz s popiskem „Webová stránka“."}
-    if len(hosts) > 1:
-        return {"status": "ambiguous", "url": None, "candidate": None,
-                "reason": "Hlídač státu uvádí více různých webových stránek: " + ", ".join(sorted(hosts)) + "."}
-    cand = cands[0]
-    try:
-        final, home = net.fetch_page(cand)
-    except (net.ApiError, ValueError) as ex:
-        return {"status": "unreachable", "url": cand, "candidate": cand, "reason": f"Web uvedený na Hlídači státu se nepodařilo otevřít ({ex})."}
-    p = parse_html(home)
-    hay = fold(f"{final} {p.title} {' '.join(p.parts)}")
+        if errors:
+            raise net.ApiError("; ".join(errors))
+        return {"status": "none", "url": None, "candidate": None, "reason": "Žádný zdroj (Wikidata, Hlídač státu) u subjektu neuvádí webovou stránku."}
     tokens = name_tokens(name)
-    if any(t in hay for t in tokens) or ico_in_text(hay, ico):
-        return {"status": "ok", "url": final, "candidate": cand, "reason": ""}
-    why = (f"obsah úvodní stránky neodpovídá názvu „{name}“" if tokens else "z názvu nelze odvodit rozlišující slovo a IČO na stránce není")
-    return {"status": "mismatch", "url": None, "candidate": cand, "reason": f"Hlídač státu uvádí web {cand}, ale {why}."}
+    ok, problems, trusted_down = [], [], None
+    for host, (cand, trusted) in list(cands.items())[:MAX_CANDIDATES]:
+        try:
+            final, home = net.fetch_page(cand)
+        except (net.ApiError, ValueError) as ex:
+            problems.append(f"{cand} se nepodařilo otevřít ({ex})")
+            trusted_down = trusted_down or ((cand, ex) if trusted else None)
+            continue
+        p = parse_html(home)
+        hay = fold(f"{final} {p.title} {' '.join(p.parts)}")
+        if any(t in hay for t in tokens) or ico_in_text(hay, ico):
+            ok.append((host, final))
+        else:
+            problems.append(f"obsah úvodní stránky {cand} neodpovídá názvu „{name}“" if tokens else
+                            f"z názvu nelze odvodit rozlišující slovo a IČO na stránce {cand} není")
+    first = next(iter(cands.values()))[0]
+    if len(ok) == 1:
+        return {"status": "ok", "url": ok[0][1], "candidate": first, "reason": ""}
+    if len(ok) > 1:
+        return {"status": "ambiguous", "url": None, "candidate": None, "reason": "Vhodných webových stránek je víc: " + ", ".join(h for h, _ in ok) + "."}
+    if trusted_down:
+        return {"status": "unreachable", "url": trusted_down[0], "candidate": trusted_down[0],
+                "reason": f"Web {trusted_down[0]} (z Wikidat podle IČO) se nepodařilo otevřít ({trusted_down[1]})."}
+    return {"status": "unverified", "url": None, "candidate": first, "reason": "Nalezené odkazy se nepodařilo potvrdit: " + "; ".join(problems) + "."}
 
 
 def web_cards_for_ico(ico, kind, name=""):
@@ -125,11 +151,11 @@ def web_cards_for_ico(ico, kind, name=""):
     except (net.ApiError, ValueError) as ex:
         return [card(title, SRC, "error", today_str(), f"Web se nepodařilo dohledat (Hlídač státu: {ex}).")]
     if r["status"] == "unreachable":
-        return [card("Dostupnost webu (jednorázové měření)", SRC, "error", today_str(), r["reason"], [], [("Adresa z Hlídače státu", r["url"])])]
+        return [card("Dostupnost webu (jednorázové měření)", SRC, "error", today_str(), r["reason"], [], [("Adresa webu", r["url"])])]
     if r["status"] != "ok":
-        links = [("Adresa z Hlídače státu (neověřená)", r["candidate"])] if r["candidate"] else []
+        links = [("Nalezená adresa (neověřená)", r["candidate"])] if r["candidate"] else []
         return [card(title, SRC, "warn", today_str(), "Web se nepodařilo spolehlivě dohledat, proto ho nekontroluji. " + r["reason"], [], links,
-                     ["Raději nic než špatný web: kontrola se spustí, jen když je adresa potvrzená popiskem v registru a obsahem stránky."])]
+                     ["Raději nic než špatný web: kontrola se spustí, jen když obsah úvodní stránky odpovídá názvu subjektu nebo jeho IČO."])]
     return web_cards(r["url"], kind)
 
 
@@ -199,7 +225,7 @@ def web_cards(url, kind):
     """Karty: dostupnost + checklist. Pokud URL chybí, vrací kartu s výzvou."""
     if not normalize_url(url):
         return [card("Web a povinně zveřejňované informace", SRC, "warn", None,
-                     "Adresu webu se nepodařilo zjistit: Hlídač státu ji u tohoto subjektu neuvádí, kontrola webu proto neproběhla.")]
+                     "Adresu webu se nepodařilo zjistit, kontrola webu proto neproběhla.")]
     res = crawl(url, MAX_PAGES)
     if not res["ok"]:
         return [card("Dostupnost webu", SRC, "error", today_str(), f"{res['url']} – {res['error']}")]
@@ -209,7 +235,7 @@ def web_cards(url, kind):
     if total_text < 400:
         notes.append("Na stránkách je velmi málo textu – web může být generovaný JavaScriptem a výsledek kontroly je pak nespolehlivý.")
     avail = card("Dostupnost webu (jednorázové měření)", SRC, status, today_str(),
-                 f"Web {res['url']} (adresa z Hlídače státu). Úvodní stránka odpověděla za {res['ms']} ms (limit pro označení za pomalou: {SLOW_MS} ms).",
+                 f"Web {res['url']} (adresa z Wikidat nebo Hlídače státu, potvrzená obsahem stránky). Úvodní stránka odpověděla za {res['ms']} ms (limit pro označení za pomalou: {SLOW_MS} ms).",
                  [], [("Otevřít web", res["url"])], notes + ["Souvislá historie dostupnosti vyžaduje opakované měření, to aplikace nedělá."])
     items = evaluate(res, kind)
     miss = [i for i in items if not i["found"]]

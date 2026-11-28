@@ -4,6 +4,7 @@ Používá ho Registr smluv (contracts.py) i dotace a veřejné zakázky (fundin
 """
 import json
 import os
+import threading
 import time
 import urllib.parse
 
@@ -13,7 +14,7 @@ from .util import find_first, num, pick
 
 API = "https://api.hlidacstatu.cz/api/v2"
 TOKEN_URL = "https://www.hlidacstatu.cz/api"
-PAUSE_S = 0.3  # prodleva mezi stránkami, ať nezatěžujeme cizí API
+PAUSE_S = 0.8  # minimální odstup mezi voláními API
 
 
 def token():
@@ -26,20 +27,46 @@ def missing_token_card(title, source, what="data"):
                 links=[("Získat token", TOKEN_URL)])
 
 
-def search(path, query, tok, max_pages=20, retries=3):
-    """Projde všechny stránky výsledků hledání `path` pro `query`. Vrací seznam položek bez duplicit.
+_gate = threading.Lock()
+_last = [0.0]
+BACKOFF_S = (3, 8, 20)  # čekání po odpovědi 429 (příliš mnoho požadavků)
 
-    Chyby: 401/403 -> odmítnutý token, ostatní chyby API se předají dál (s kódem, aby volající mohl zkusit jinou variantu)."""
+
+def _throttle():
+    """Všechna volání API (ze všech záložek a návštěvníků) jdou přes jednu bránu s minimálním odstupem, ať nenarazíme na limit."""
+    if net.DEMO:
+        return
+    with _gate:
+        wait = _last[0] + PAUSE_S - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        _last[0] = time.monotonic()
+
+
+def get(path, query, tok, page=1, retries=3):
+    """Jedna stránka výsledků. Při 429 počká a zkusí znovu; 401/403 = odmítnutý token."""
     headers = {"Authorization": f"Token {tok}"}
-    out, seen = [], set()
-    for page in range(1, max_pages + 1):
-        url = f"{API}{path}?" + urllib.parse.urlencode({"dotaz": query, "strana": page})
+    url = f"{API}{path}?" + urllib.parse.urlencode({"dotaz": query, "strana": page})
+    for attempt in range(len(BACKOFF_S) + 1):
+        _throttle()
         try:
-            data = net.http_json(url, headers=headers, retries=retries)
+            return net.http_json(url, headers=headers, retries=retries)
         except net.ApiError as ex:
             if ex.code in (401, 403):
                 raise net.ApiError(f"Hlídač státu odmítl token (HTTP {ex.code}). Zkontrolujte HLIDAC_TOKEN na {TOKEN_URL}", ex.code) from ex
+            if ex.code == 429 and attempt < len(BACKOFF_S):
+                time.sleep(0 if net.DEMO else BACKOFF_S[attempt])
+                continue
             raise
+
+
+def search(path, query, tok, max_pages=20, retries=3):
+    """Projde všechny stránky výsledků hledání `path` pro `query`. Vrací seznam položek bez duplicit.
+
+    Chyby: 401/403 -> odmítnutý token, 429 -> počká a opakuje, ostatní chyby API se předají dál (s kódem, aby volající mohl zkusit jinou variantu)."""
+    out, seen = [], set()
+    for page in range(1, max_pages + 1):
+        data = get(path, query, tok, page, retries)
         items = data if isinstance(data, list) else (find_first(data, ["results", "items", "data"]) if isinstance(data, dict) else None) or []
         fresh = 0
         for it in items:
@@ -51,6 +78,4 @@ def search(path, query, tok, max_pages=20, retries=3):
         total = num(data.get("total")) if isinstance(data, dict) else None
         if not fresh or (total and len(out) >= total):
             break
-        if not net.DEMO:
-            time.sleep(PAUSE_S)
     return out

@@ -15,7 +15,7 @@ SRC_Z = "Hlídač státu – Veřejné zakázky"
 DOTACE_PATH = "/Dotace/Hledat"
 ZAKAZKY_PATHS = ("/VerejneZakazky/Hledat", "/Zakazky/Hledat")
 DOTACE_QUERIES = ("ico:{ico}",)
-ZAKAZKY_QUERIES = ("icoZadavatel:{ico}", "ico:{ico}")
+ZAKAZKY_QUERIES = ("icozadavatel:{ico}", "ico:{ico}")
 MAX_PAGES = 20
 
 

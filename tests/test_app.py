@@ -182,16 +182,10 @@ class TestModules(Base):
         self.assertTrue(r[0]["source"].startswith("ARES"))
 
     def test_schools_error_lists_reasons(self):
-        net.set_demo(True)
-        orig = schools.load_index
-        schools.load_index = lambda: (_ for _ in ()).throw(net.ApiError("HTTP 404"))
-        try:
-            with self.assertRaises(net.ApiError) as cm:
-                schools.schools_for_obec("00100003", "zs")
-            self.assertIn("Hlídač státu", str(cm.exception))
-            self.assertIn("HTTP 404", str(cm.exception))
-        finally:
-            schools.load_index = orig
+        with self.assertRaises(net.ApiError) as cm:
+            schools.schools_for_obec("00100003", "zs")
+        self.assertIn("Hlídač státu", str(cm.exception))
+        self.assertIn("ARES", str(cm.exception))
 
     def test_hlidac_links_case_insensitive(self):
         html = '<a href="/Subjekt/46390529">Masarykova základní škola Velký Osek, okres Kolín</a><a href="/Subjekt/Index/70926735">Mateřská škola Velký Osek</a>'
@@ -202,13 +196,6 @@ class TestModules(Base):
         finally:
             net.fetch_page = orig
         self.assertEqual({x["ico"]: x["kinds"] for x in r}, {"46390529": ["zs"], "70926735": ["ms"]})
-
-    def test_schools_fallback_to_rejstrik(self):
-        r = schools.schools_for_obec("99999999", "ms")  # Hlídač stránku nemá (404) -> rejstřík MŠMT
-        self.assertEqual(r[0]["ico"], "70000002")
-        self.assertEqual(r[0]["source"], "rejstřík MŠMT")
-        zs = schools.parse_rejstrik(__import__("io").BytesIO(demo.XML))[demo.OBEC_ICO][0]
-        self.assertEqual(zs["web"], "https://skola.demo")
 
     def test_overview_pads_contracts_without_value(self):
         raw = demo._obec_contracts()[:2] + [{"Id": 1000 + i, "predmet": f"Bez ceny {i}", "datumUzavreni": demo._d(i + 1),
@@ -232,10 +219,18 @@ class TestModules(Base):
         r = webcheck.find_site(demo.OBEC_ICO, "Obec Ukázkov")
         self.assertEqual((r["status"], r["url"]), ("ok", "https://obec.demo/"))  # reklama SalesKit a YouTube se ignorují
         self.assertEqual(webcheck.find_site(demo.SKOLA_ICO, "Základní škola a mateřská škola Ukázkov, příspěvková organizace")["status"], "ok")
-        self.assertEqual(webcheck.find_site("70000003", "Mateřská škola Pohádka")["status"], "none")  # jen reklama a odkaz bez popisku
+        self.assertEqual(webcheck.find_site("70000003", "Mateřská škola Pohádka")["status"], "unverified")  # jen nedostupný odkaz bez potvrzení; reklama (SalesKit) se vůbec nebere
         r = webcheck.find_site("70000005", "Mateřská škola Ukázkov")
-        self.assertEqual((r["status"], r["url"], r["candidate"]), ("mismatch", None, "https://other.demo/"))
+        self.assertEqual((r["status"], r["url"], r["candidate"]), ("unverified", None, "https://other.demo/"))
         self.assertEqual(webcheck.find_site("70000006", "Mateřská škola Ukázkov")["status"], "ambiguous")
+
+    def test_find_site_wikidata_is_trusted(self):
+        r = webcheck.find_site(demo.OBEC_ICO, "Obec Ukázkov")  # Wikidata i Hlídač uvádějí stejný host -> jeden kandidát
+        self.assertEqual(r["status"], "ok")
+        r = webcheck.find_site("00100002", "Městys Ukázkov Nový")  # Wikidata: web, který neodpovídá -> nedostupný, a protože je z důvěryhodného zdroje, hlásí se
+        self.assertEqual((r["status"], r["url"]), ("unreachable", "http://down.demo/"))
+        cs = webcheck.web_cards_for_ico("00100002", "obec", "Městys Ukázkov Nový")
+        self.assertEqual(cs[0]["status"], "error")
 
     def test_name_tokens(self):
         self.assertEqual(webcheck.name_tokens("Obec Velim"), ["velim"])
@@ -276,6 +271,47 @@ class TestModules(Base):
                     net.check_public_url(u)
         finally:
             net.set_demo(True)
+
+
+class TestResilience(Base):
+    def test_hlidac_retries_429(self):
+        calls = []
+        orig = net.http_json
+
+        def flaky(url, headers=None, data=None, retries=3, timeout=30):
+            calls.append(url)
+            if len(calls) < 3:
+                raise net.ApiError("HTTP 429", 429)
+            return {"total": 0, "results": []}
+        net.http_json = flaky
+        try:
+            self.assertEqual(hlidac.search("/Smlouvy/Hledat", "ico:1", "t"), [])
+        finally:
+            net.http_json = orig
+        self.assertEqual(len(calls), 3)
+
+    def test_hlidac_gives_up_on_persistent_429(self):
+        orig = net.http_json
+
+        def always(*a, **k):
+            raise net.ApiError("HTTP 429", 429)
+        net.http_json = always
+        try:
+            with self.assertRaises(net.ApiError) as cm:
+                hlidac.search("/Dotace/Hledat", "ico:1", "t")
+            self.assertEqual(cm.exception.code, 429)
+        finally:
+            net.http_json = orig
+
+    def test_elections_try_second_date(self):
+        c = elections.election_card(demo.KOD_OBCE)  # demo má pro 2018 data jen u druhého dne voleb
+        self.assertEqual(c["status"], "info")
+        self.assertIn("2018", [r[0] for r in c["blocks"][1]["rows"]])
+
+    def test_elections_server_error_text(self):
+        c = elections.election_card("123456")
+        self.assertEqual(c["status"], "warn")
+        self.assertIn("nevolí", c["intro"])
 
 
 class TestRefactor(Base):
