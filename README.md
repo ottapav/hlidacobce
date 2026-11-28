@@ -34,6 +34,19 @@ Aplikace sama pozná hosting podle proměnné `PORT`: poslouchá na `0.0.0.0` a 
 
 Veřejná instance používá váš token Hlídače státu, proto je zapnutý limit požadavků na IP a adresy webů zadané uživatelem se stahují jen z veřejných IP adres (ochrana před dotazy do vnitřní sítě).
 
+## Struktura kódu
+
+| Modul | Úloha |
+|---|---|
+| `net.py` | veškerý síťový přístup (JSON, streamy, stránky s ochranou proti SSRF, režim demo) |
+| `util.py`, `cards.py`, `htmlutil.py` | pomocné funkce, stavební kameny karet, čtení HTML |
+| `ares.py`, `hlidac.py`, `schools.py` | klienti zdrojů: ARES, sdílený klient Hlídače státu, školy (Hlídač → ARES → rejstřík MŠMT) |
+| `contracts.py`, `funding.py`, `elections.py`, `csu.py`, `webcheck.py`, `sources.py` | jednotlivé zdroje, každý vrací karty |
+| `tabs.py` | skládá karty do záložek; každý zdroj je izolovaný (chyba jedné karty neshodí záložku) a nezávislé zdroje běží souběžně |
+| `server.py`, `static/` | HTTP server, omezení požadavků, UI |
+
+Nový zdroj = nová funkce vracející kartu (nebo seznam karet) a jeden řádek v příslušné `tab_*` v `tabs.py`.
+
 ## Co aplikace záměrně nedělá
 
 Měření dostupnosti webů v čase, upozornění na nové smlouvy od minulého spuštění a cokoli, co vyžaduje opakované volání. Karta „Dostupnost webu“ je jen jednorázové měření.
@@ -43,7 +56,7 @@ Měření dostupnosti webů v čase, upozornění na nové smlouvy od minulého 
 Vývoj proběhl bez přístupu k živým zdrojům, proto platí:
 
 - **Otestováno** na vymyšlených datech (`--demo`): logika signálů, parsery, server, rozhraní.
-- **Neověřeno naživo**: cesta a pole API Hlídače státu (`HLIDAC_SEARCH_PATH` v `contracts.py`, pole čte tolerantně), dotaz na DataStat API (kódy dimenzí jsou z katalogu sady OBY02E, formát odpovědi JSON-stat ověřen jen na vzorku) a záložní CSV ČSÚ (sloupce se rozpoznávají podle hlavičky), cesty a pole API Hlídače státu pro dotace a zakázky (`funding.py`), názvy atributů v XML volby.cz (adresa a parametry jsou z oficiální dokumentace KV2022, schéma XSD ne), struktura XML rejstříku škol MŠMT, odpovědi ARES. Když něco nesedí, karta ukáže chybu a odkaz na zdroj; nic se nezadává ručně: školy i adresy webů se zjišťují z registrů.
+- **Neověřeno naživo**: cesta a pole API Hlídače státu (`SEARCH_PATH` v `contracts.py`, pole čte tolerantně), dotaz na DataStat API (kódy dimenzí jsou z katalogu sady OBY02E, formát odpovědi JSON-stat ověřen jen na vzorku) a záložní CSV ČSÚ (sloupce se rozpoznávají podle hlavičky), cesty a pole API Hlídače státu pro dotace a zakázky (`funding.py`), názvy atributů v XML volby.cz (adresa a parametry jsou z oficiální dokumentace KV2022, schéma XSD ne), struktura XML rejstříku škol MŠMT, odpovědi ARES. Když něco nesedí, karta ukáže chybu a odkaz na zdroj; nic se nezadává ručně: školy i adresy webů se zjišťují z registrů.
 - **Kontrola webu je heuristika**: hledá klíčová slova v textu a odkazech. „Nenalezeno“ neznamená „nezveřejněno“ (web může být generovaný JavaScriptem, dokumenty mohou být jinde).
 - **Právní opory jsou orientační**, nejde o právní poradenství. Před jakýmkoli závěrem ověřte znění předpisů.
 - Registr smluv neobsahuje smlouvy do 50 000 Kč a obce do 3 000 obyvatel mají výjimku; u škol se povinnost týká jen zřizovaných ORP nebo krajem.

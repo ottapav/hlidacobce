@@ -8,14 +8,13 @@ import urllib.request
 os.environ["HLIDACOBCE_CACHE"] = tempfile.mkdtemp()
 os.environ["HLIDAC_TOKEN"] = "demo-token"
 
-from hlidacobce import contracts, csu, demo, elections, funding, net, schools, server, tabs, webcheck  # noqa: E402
+from hlidacobce import contracts, csu, demo, elections, funding, hlidac, net, schools, server, tabs, util, webcheck  # noqa: E402
 
 
 class Base(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         net.set_demo(True)
-        csu.CACHE_DIR = schools.CACHE_DIR = os.environ["HLIDACOBCE_CACHE"]
 
     @classmethod
     def tearDownClass(cls):
@@ -117,7 +116,7 @@ class TestModules(Base):
             os.environ["HLIDAC_TOKEN"] = old
 
     def test_find_first_nested(self):
-        self.assertEqual(funding.find_first({"a": {"B": [{"castka": 5}]}}, ["x", "castka"]), 5)
+        self.assertEqual(util.find_first({"a": {"B": [{"castka": 5}]}}, ["x", "castka"]), 5)
 
     def test_csu_api(self):
         info = csu.csu_load(demo.KOD_OBCE)
@@ -276,6 +275,47 @@ class TestModules(Base):
                     net.check_public_url(u)
         finally:
             net.set_demo(True)
+
+
+class TestRefactor(Base):
+    def test_guard_isolates_failures(self):
+        def boom():
+            raise RuntimeError("chyba v kódu")
+        cs = tabs._guard("Zdroj", "test", boom)
+        self.assertEqual([c["status"] for c in cs], ["error"])
+        self.assertNotIn("chyba v kódu", json.dumps(cs, ensure_ascii=False))  # interní text se uživateli neukazuje
+        orig = funding.tender_card
+        funding.tender_card = lambda ico: 1 / 0
+        try:
+            data = tabs.tab_obec(demo.OBEC_ICO)  # jedna rozbitá karta nesmí zničit záložku
+        finally:
+            funding.tender_card = orig
+        statuses = {c["title"]: c["status"] for c in data["cards"]}
+        self.assertEqual(statuses["Veřejné zakázky (Hlídač státu)"], "error")
+        self.assertIn("Základní údaje (ARES)", statuses)
+        self.assertIn("Dotace (Hlídač státu)", statuses)
+
+    def test_tab_order_is_stable(self):
+        titles = [c["title"] for c in tabs.tab_obec(demo.OBEC_ICO)["cards"]]
+        self.assertEqual(titles[0], "Základní údaje (ARES)")
+        self.assertLess(titles.index("Dotace (Hlídač státu)"), titles.index("Veřejné zakázky (Hlídač státu)"))
+        self.assertLess(titles.index("Veřejné zakázky (Hlídač státu)"), titles.index("MF – Monitor státní pokladny (rozpočet obce)"))
+
+    def test_hlidac_search_dedupes_and_pages(self):
+        items = hlidac.search("/Smlouvy/Hledat", "ico:%s" % demo.OBEC_ICO, "demo-token")
+        ids = [str(util.pick(i, "id", "idVerze", "idSmlouvy")) for i in items]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertTrue(items)
+
+    def test_missing_token_card(self):
+        c = hlidac.missing_token_card("T", "S", "dotace")
+        self.assertEqual(c["status"], "error")
+        self.assertIn("HLIDAC_TOKEN", c["intro"])
+
+    def test_util(self):
+        self.assertEqual(util.thousands(1234567), "1\u00a0234\u00a0567")
+        self.assertEqual(util.find_first({"A": [{"b": {"C": 1}}]}, ["x", "c"]), 1)
+        self.assertIsNone(util.find_first({"a": 1}, ["zzz"]))
 
 
 class TestServer(Base):

@@ -1,4 +1,4 @@
-"""Lokální HTTP server: statické UI + JSON API. Poslouchá jen na 127.0.0.1 a každé volání je jednorázové."""
+"""HTTP server: statické UI + JSON API. Lokálně poslouchá na 127.0.0.1, na hostingu (nastavené PORT) na 0.0.0.0. Každé volání je jednorázové."""
 import json
 import os
 import re
@@ -10,7 +10,7 @@ import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import __version__, ares, contracts, csu, net, tabs
+from . import __version__, ares, csu, hlidac, net, tabs
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
 TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "application/javascript; charset=utf-8"}
@@ -121,7 +121,7 @@ class Handler(BaseHTTPRequestHandler):
     def _api(self, route, q):
         if route == "status":
             return self._json({"version": __version__, "commit": os.environ.get("RENDER_GIT_COMMIT", "")[:7], "demo": net.DEMO,
-                               "token": bool(contracts.token())})
+                               "token": bool(hlidac.token())})
         if route == "obce":
             term = q.get("q", "").strip()
             if len(term) < 2:
@@ -173,7 +173,7 @@ def serve(port=8765, open_browser=True, host="127.0.0.1"):
     print(f"Hlídač obce {__version__} běží na {url}  (Ctrl+C ukončí)", flush=True)
     if net.DEMO:
         print("REŽIM DEMO: všechna data jsou vymyšlená, nic se nestahuje z internetu.")
-    elif not contracts.token():
+    elif not hlidac.token():
         print("Upozornění: není nastaven HLIDAC_TOKEN, karty Registru smluv budou jen vysvětlovat, jak token získat.")
     if open_browser:
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()

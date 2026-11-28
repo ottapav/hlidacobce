@@ -36,10 +36,6 @@ def text(s):
     return {"type": "text", "text": s}
 
 
-def bullets(items):
-    return {"type": "list", "items": list(items)}
-
-
 def kv(rows):
     return {"type": "kv", "rows": [[k, "–" if v in (None, "") else str(v)] for k, v in rows]}
 

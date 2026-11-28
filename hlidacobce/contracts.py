@@ -1,14 +1,10 @@
 """Registr smluv (Hlídač státu): stažení smluv a signály ke kontrole -> karty."""
-import json
-import os
 import re
-import time
-import urllib.parse
 from collections import defaultdict
 from datetime import date, timedelta
 
-from . import ares, net
-from .cards import (bullets, card, cell_link, cell_right, heading, kv, table, text, today_str)
+from . import ares, hlidac, net
+from .cards import card, cell_link, cell_right, heading, kv, table, text, today_str
 from .util import czk, cz_date, norm_ico, num, parse_date, pick
 
 SRC = "Hlídač státu – Registr smluv"
@@ -25,8 +21,7 @@ NEW_COMPANY_DAYS = 365
 ARES_TOP_SUPPLIERS = 15
 MAX_PAGES = 40
 
-HLIDAC_API = "https://api.hlidacstatu.cz/api/v2"
-HLIDAC_SEARCH_PATH = "/Smlouvy/Hledat"
+SEARCH_PATH = "/Smlouvy/Hledat"
 
 OBEC_NOTE = ("Registr smluv neobsahuje smlouvy do 50 000 Kč bez DPH a obce do 3 000 obyvatel mají zákonnou výjimku, "
              "takže chybějící smlouvy nemusí znamenat nic špatného.")
@@ -34,40 +29,15 @@ SCHOOL_NOTE = ("Podle metodiky MŠMT se povinnost zveřejňovat smlouvy v regist
                "s rozšířenou působností nebo krajem. U ostatních škol jsou smlouvy v registru dobrovolné nebo chybí.")
 
 
-def token():
-    return os.environ.get("HLIDAC_TOKEN", "").strip()
-
-
 def fetch_contracts(ico, since, tok):
     query = f"ico:{ico} AND podepsano:[{since:%Y-%m-%d} TO *]"
-    headers = {"Authorization": f"Token {tok}"}
-    out, seen = [], set()
-    for page in range(1, MAX_PAGES + 1):
-        url = f"{HLIDAC_API}{HLIDAC_SEARCH_PATH}?" + urllib.parse.urlencode({"dotaz": query, "strana": page})
-        try:
-            data = net.http_json(url, headers=headers)
-        except net.ApiError as ex:
-            if ex.code in (401, 403):
-                raise net.ApiError("Hlídač státu odmítl token (401/403). Zkontrolujte HLIDAC_TOKEN na https://www.hlidacstatu.cz/api", ex.code) from ex
-            if ex.code in (400, 404):
-                raise net.ApiError(f"API Hlídače státu vrátilo {ex.code}. Ověřte cestu a parametry ve Swaggeru "
-                                   "(https://api.hlidacstatu.cz/swagger/index.html) a upravte HLIDAC_SEARCH_PATH v contracts.py.", ex.code) from ex
-            raise
-        items = data if isinstance(data, list) else pick(data, "results", "items", "data") or []
-        fresh = 0
-        for it in items:
-            sid = str(pick(it, "id", "idVerze", "idSmlouvy") or json.dumps(it, sort_keys=True, default=str))
-            if sid in seen:
-                continue
-            seen.add(sid)
-            out.append(it)
-            fresh += 1
-        total = num(pick(data, "total")) if isinstance(data, dict) else None
-        if not fresh or (total and len(out) >= total):
-            break
-        if not net.DEMO:
-            time.sleep(0.3)
-    return out
+    try:
+        return hlidac.search(SEARCH_PATH, query, tok, max_pages=MAX_PAGES)
+    except net.ApiError as ex:
+        if ex.code in (400, 404):
+            raise net.ApiError(f"API Hlídače státu vrátilo {ex.code}. Ověřte cestu a parametry ve Swaggeru "
+                               f"(https://api.hlidacstatu.cz/swagger/index.html) a upravte SEARCH_PATH v contracts.py.", ex.code) from ex
+        raise
 
 
 def normalize(raw, ico):
@@ -263,11 +233,9 @@ def _merge(cards_, title):
 
 
 def contract_cards(ico, months=12, compact=False, note=OBEC_NOTE):
-    tok = token()
+    tok = hlidac.token()
     if not tok:
-        return [card("Registr smluv (Hlídač státu)", SRC, "error", None,
-                     "Chybí API token. Získejte ho po registraci na https://www.hlidacstatu.cz/api, nastavte proměnnou prostředí "
-                     "HLIDAC_TOKEN a aplikaci spusťte znovu.", links=[("Získat token", "https://www.hlidacstatu.cz/api")])]
+        return [hlidac.missing_token_card("Registr smluv (Hlídač státu)", SRC, "smlouvy")]
     since = date.today() - timedelta(days=round(months * 30.44))
     try:
         raw = fetch_contracts(ico, since, tok)

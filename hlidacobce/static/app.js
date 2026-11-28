@@ -101,7 +101,6 @@
     if (b.type === "bars") return barsBlock(b);
     if (b.type === "heading") return el("h3", null, b.text);
     if (b.type === "text") return el("p", null, b.text);
-    if (b.type === "list") { d = el("ul"); b.items.forEach(function (i) { d.appendChild(el("li", null, i)); }); return d; }
     if (b.type === "kv") {
       d = el("dl", "kv");
       b.rows.forEach(function (r) { d.appendChild(el("dt", null, r[0])); d.appendChild(el("dd", null, r[1])); });

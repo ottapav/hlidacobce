@@ -1,5 +1,5 @@
 """Karty, které jen odkazují na zdroje bez ověřeného strojového přístupu (status 'link')."""
-from .cards import card, bullets, text
+from .cards import card
 
 
 def _link_card(title, source, intro, links, notes=None, asof=None):
@@ -50,7 +50,7 @@ def csu_link_cards():
 def school_link_cards(kind):
     what = "školy" if kind == "zs" else "školky"
     return [
-        _link_card(f"Česká školní inspekce – inspekční zprávy", "Česká školní inspekce",
+        _link_card("Česká školní inspekce – inspekční zprávy", "Česká školní inspekce",
                    f"Inspekční zprávy a výsledky kontrol {what}.",
                    [("InspIS PORTÁL", "https://portal.csicr.cz")], ["Vyhledání podle názvu nebo IZO je ruční."]),
         _link_card("MŠMT – Rejstřík škol a školských zařízení", "Ministerstvo školství, mládeže a tělovýchovy",

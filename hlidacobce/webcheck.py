@@ -6,10 +6,9 @@ Je to heuristika: hledá klíčová slova v textu stránek a odkazů. "Nenalezen
 import re
 import time
 import urllib.parse
-from html.parser import HTMLParser
-
 from . import net
-from .cards import card, cell_link, table, text, today_str
+from .cards import card, cell_link, table, today_str
+from .htmlutil import parse_html
 from .util import fold
 
 MAX_PAGES = 18
@@ -62,52 +61,6 @@ FOLLOW = re.compile(r"rad|program|uplat|zapis|kriter|zprava|dokument|informac|gd
                     r"kontakt|povinn|vyhled|ucet|vyhlask|usneseni|poradens|ke-stazeni|download|o-skole|o-obci", re.I)
 
 
-class _Page(HTMLParser):
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.parts, self.links, self.title, self._skip, self._in_title, self._href, self._atxt = [], [], "", 0, False, None, []
-        self.link_prev, self._prev = [], ""  # text těsně před každým odkazem (paralelně k self.links)
-
-    def handle_starttag(self, tag, attrs):
-        if tag in ("script", "style", "noscript"):
-            self._skip += 1
-        elif tag == "title":
-            self._in_title = True
-        elif tag == "a":
-            self._href, self._atxt = dict(attrs).get("href"), []
-            self._prev = self.parts[-1] if self.parts else ""
-
-    def handle_endtag(self, tag):
-        if tag in ("script", "style", "noscript") and self._skip:
-            self._skip -= 1
-        elif tag == "title":
-            self._in_title = False
-        elif tag == "a" and self._href is not None:
-            self.links.append((self._href, " ".join(self._atxt).strip()))
-            self.link_prev.append(self._prev)
-            self._href = None
-
-    def handle_data(self, data):
-        if self._skip:
-            return
-        if self._in_title:
-            self.title += data
-        s = data.strip()
-        if s:
-            self.parts.append(s)
-            if self._href is not None:
-                self._atxt.append(s)
-
-
-def parse_html(html):
-    p = _Page()
-    try:
-        p.feed(html)
-    except Exception:  # noqa: BLE001 - rozbité HTML nesmí shodit kontrolu
-        pass
-    return p
-
-
 LABEL = re.compile(r"webov\w* stran|oficialni web|internetov\w* stran|^web:?$|^www:?$")
 GENERIC = {"obec", "mesto", "mestys", "statutarni", "zakladni", "skola", "materska", "prispevkova", "organizace", "okres", "a", "s", "r", "o", "p",
            "ms", "zs", "skolka", "ceska", "republika", "praha"}
@@ -117,6 +70,14 @@ def name_tokens(name):
     """Rozlišující slova z názvu subjektu (bez obecných slov a bez okresu): podle nich se ověřuje, že web patří subjektu."""
     words = re.findall(r"[a-z0-9]+", fold(re.split(r",?\s*okres\b", str(name or ""), flags=re.I)[0]))
     return [w for w in words if w not in GENERIC and len(w) >= 4]
+
+
+def ico_in_text(hay, ico):
+    return bool(re.search(r"(?<!\d)" + re.escape(str(ico).lstrip("0")) + r"(?!\d)", hay))
+
+
+def _bare_host(url):
+    return (urllib.parse.urlparse(url).hostname or "").lower().removeprefix("www.")
 
 
 def find_site(ico, name):
@@ -136,7 +97,7 @@ def find_site(ico, name):
             continue
         if LABEL.search(fold(prev)) or LABEL.search(fold(label)):
             cands.append(href)
-    hosts = {(urllib.parse.urlparse(u).hostname or "").lower().removeprefix("www.") for u in cands}
+    hosts = {_bare_host(u) for u in cands}
     if not cands:
         return {"status": "none", "url": None, "candidate": None, "reason": "Hlídač státu u subjektu neuvádí odkaz s popiskem „Webová stránka“."}
     if len(hosts) > 1:
@@ -150,14 +111,10 @@ def find_site(ico, name):
     p = parse_html(home)
     hay = fold(f"{final} {p.title} {' '.join(p.parts)}")
     tokens = name_tokens(name)
-    if any(t in hay for t in tokens) or (norm_ico_in(hay, ico)):
+    if any(t in hay for t in tokens) or ico_in_text(hay, ico):
         return {"status": "ok", "url": final, "candidate": cand, "reason": ""}
     why = (f"obsah úvodní stránky neodpovídá názvu „{name}“" if tokens else "z názvu nelze odvodit rozlišující slovo a IČO na stránce není")
     return {"status": "mismatch", "url": None, "candidate": cand, "reason": f"Hlídač státu uvádí web {cand}, ale {why}."}
-
-
-def norm_ico_in(hay, ico):
-    return bool(re.search(r"(?<!\d)" + re.escape(str(ico).lstrip("0")) + r"(?!\d)", hay))
 
 
 def web_cards_for_ico(ico, kind, name=""):
@@ -185,12 +142,6 @@ def normalize_url(u):
     return u
 
 
-def _same_site(a, b):
-    ha, hb = urllib.parse.urlparse(a).hostname or "", urllib.parse.urlparse(b).hostname or ""
-    strip = lambda h: h[4:] if h.startswith("www.") else h  # noqa: E731
-    return strip(ha) == strip(hb)
-
-
 def crawl(url, max_pages=MAX_PAGES):
     """Stáhne úvodní stránku a až max_pages relevantních stránek ze stejné domény. Vrací dict s výsledkem."""
     url = normalize_url(url)
@@ -211,7 +162,7 @@ def crawl(url, max_pages=MAX_PAGES):
     seen, queue = {final.split("#")[0]}, []
     for u, t in pages[0]["links"]:
         u = u.split("#")[0]
-        if _same_site(final, u) and u not in seen and FOLLOW.search(fold(f"{u} {t}")) \
+        if _bare_host(final) == _bare_host(u) and u not in seen and FOLLOW.search(fold(f"{u} {t}")) \
                 and not re.search(r"\.(pdf|docx?|xlsx?|zip|jpe?g|png)$", u, re.I):
             seen.add(u)
             queue.append(u)
@@ -244,7 +195,7 @@ def evaluate(res, kind):
     return out
 
 
-def web_cards(url, kind, name=""):
+def web_cards(url, kind):
     """Karty: dostupnost + checklist. Pokud URL chybí, vrací kartu s výzvou."""
     if not normalize_url(url):
         return [card("Web a povinně zveřejňované informace", SRC, "warn", None,

@@ -3,56 +3,20 @@
 Cesty, parametry dotazu a názvy polí jsem naživo neověřil (dokumentace REST API nebyla dostupná). Proto jsou cesty a varianty dotazu
 konstanty níže a pole se hledají tolerantně v celé (i vnořené) odpovědi. Když API nevrátí použitelná data, karta to řekne a odkáže na web.
 """
-import json
-import re
-import time
-import urllib.parse
 from collections import defaultdict
 from datetime import date
 
-from . import contracts, net
+from . import hlidac, net
 from .cards import bars, card, cell_link, cell_right, heading, kv, table, today_str
-from .util import czk, cz_date, fold, num, parse_date
+from .util import czk, cz_date, find_first, num, parse_date
 
-SRC = "Hlídač státu – Dotace" 
+SRC = "Hlídač státu – Dotace"
 SRC_Z = "Hlídač státu – Veřejné zakázky"
-HLIDAC_API = contracts.HLIDAC_API
 DOTACE_PATH = "/Dotace/Hledat"
 ZAKAZKY_PATHS = ("/VerejneZakazky/Hledat", "/Zakazky/Hledat")
 DOTACE_QUERIES = ("ico:{ico}",)
 ZAKAZKY_QUERIES = ("icoZadavatel:{ico}", "ico:{ico}")
 MAX_PAGES = 20
-
-
-def find_first(obj, names, depth=0):
-    """První neprázdná hodnota pod klíčem z `names` (v pořadí priorit; bez ohledu na velikost písmen), hledá i ve vnořených objektech."""
-    if depth > 4:
-        return None
-    for name in names:
-        hit = _dfs(obj, name.lower(), 0)
-        if hit not in (None, "", [], {}):
-            return hit
-    return None
-
-
-def _dfs(obj, key, depth):
-    if depth > 4:
-        return None
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            if str(k).lower() == key and v not in (None, "", [], {}):
-                return v
-        for v in obj.values():
-            if isinstance(v, (dict, list)):
-                r = _dfs(v, key, depth + 1)
-                if r not in (None, "", [], {}):
-                    return r
-    elif isinstance(obj, list):
-        for v in obj[:20]:
-            r = _dfs(v, key, depth + 1)
-            if r not in (None, "", [], {}):
-                return r
-    return None
 
 
 def _text(v):
@@ -68,29 +32,12 @@ def fetch_all(paths, queries, tok, ico):
     last = None
     for path in paths:
         for q in (x.format(ico=ico) for x in queries):
-            items, seen = [], set()
             try:
-                for page in range(1, MAX_PAGES + 1):
-                    url = f"{HLIDAC_API}{path}?" + urllib.parse.urlencode({"dotaz": q, "strana": page})
-                    data = net.http_json(url, headers={"Authorization": f"Token {tok}"}, retries=1, timeout=30)
-                    batch = data if isinstance(data, list) else (find_first(data, ["results", "items", "data"]) if isinstance(data, dict) else None) or []
-                    fresh = 0
-                    for it in batch:
-                        key = str(find_first(it, ["id"]) or json.dumps(it, sort_keys=True, default=str))
-                        if key not in seen:
-                            seen.add(key)
-                            items.append(it)
-                            fresh += 1
-                    total = num(data.get("total")) if isinstance(data, dict) else None
-                    if not fresh or (total and len(items) >= total):
-                        break
-                    if not net.DEMO:
-                        time.sleep(0.3)
-                return items, q
+                return hlidac.search(path, q, tok, max_pages=MAX_PAGES, retries=1), q
             except net.ApiError as ex:
-                last = ex
                 if ex.code in (401, 403):
-                    raise net.ApiError("Hlídač státu odmítl token (401/403).", ex.code) from ex
+                    raise
+                last = ex
     raise net.ApiError(f"API Hlídače státu nevrátilo použitelnou odpověď ({last}). Cesta nebo dotaz se mohou lišit od dokumentace.")
 
 
@@ -112,11 +59,11 @@ def norm_subsidy(raw):
 def subsidy_card(ico):
     title = "Dotace (Hlídač státu)"
     links = [("Dotace subjektu na Hlídači státu", f"https://www.hlidacstatu.cz/dotace/hledat?q=ico:{ico}")]
-    tok = contracts.token()
+    tok = hlidac.token()
     if not tok:
-        return card(title, SRC, "error", None, "Chybí API token Hlídače státu (HLIDAC_TOKEN), dotace nelze načíst.", links=links)
+        return hlidac.missing_token_card(title, SRC, "dotace")
     try:
-        raw, q = fetch_all((DOTACE_PATH,), DOTACE_QUERIES, tok, ico)
+        raw, _ = fetch_all((DOTACE_PATH,), DOTACE_QUERIES, tok, ico)
     except net.ApiError as ex:
         return card(title, SRC, "error", None, str(ex), links=links)
     subs = [norm_subsidy(r) for r in raw]
@@ -154,9 +101,9 @@ def norm_tender(raw):
 def tender_card(ico):
     title = "Veřejné zakázky (Hlídač státu)"
     links = [("Subjekt na Hlídači státu", f"https://www.hlidacstatu.cz/subjekt/{ico}")]
-    tok = contracts.token()
+    tok = hlidac.token()
     if not tok:
-        return card(title, SRC_Z, "error", None, "Chybí API token Hlídače státu (HLIDAC_TOKEN), zakázky nelze načíst.", links=links)
+        return hlidac.missing_token_card(title, SRC_Z, "zakázky")
     try:
         raw, q = fetch_all(ZAKAZKY_PATHS, ZAKAZKY_QUERIES, tok, ico)
     except net.ApiError as ex:

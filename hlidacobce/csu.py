@@ -3,8 +3,8 @@
 Rychlá cesta: DataStat API (výběr jedné obce, JSON-stat) – dotaz na jednu obec je v řádu sekund. Struktura sady OBY02E
 (kódy dimenzí, verze, ukazatel 2406P) je převzata z oficiálního katalogu; formát odpovědi na dotaz nebyl ověřen naživo.
 Záloha: velký CSV soubor se stáhne a projde JEDNOU (komprimovaný přenos, streamování) do lokálního indexu SQLite
-pro všechny obce. Dotaz na konkrétní obec je pak okamžitý. Příprava indexu běží na pozadí (spouští se při startu
-serveru), karta mezitím ukáže, že se data připravují, a klient ji po chvíli načte znovu.
+pro všechny obce. Dotaz na konkrétní obec je pak okamžitý. Příprava indexu se spustí až při prvním selhání API a běží
+na pozadí; karta mezitím ukáže, že se data připravují, a klient ji po chvíli načte znovu.
 """
 import csv
 import io
@@ -18,7 +18,7 @@ from datetime import date
 
 from . import net
 from .cards import card, table, cell_right
-from .util import cz_date
+from .util import cache_dir, cz_date
 
 CSU_DATASET = "OBY02E"  # obyvatelstvo podle pohlaví a základních věkových skupin (úroveň obcí)
 CSU_URL = "https://data.csu.gov.cz/opendata/sady/{kod}/distribuce/csv"
@@ -31,7 +31,6 @@ USE_API = True
 # Kódy z katalogu sady OBY02E (verze 4); za běhu se zkusí zjistit znovu, tohle jsou výchozí hodnoty.
 API_DEFAULTS = {"verze": "4", "indicator": "2406P", "territory": "UZ5ALLOKR", "time": "CasRB", "sex": "POHL2", "age": "VekSkupZakl"}
 API_TYPES = {"territory": "VUZEMI", "time": "REF_CAS", "sex": "POHLAVI", "age": "VEK"}
-CACHE_DIR = os.environ.get("HLIDACOBCE_CACHE", ".hlidacobce_cache")
 SRC = "Český statistický úřad (DataStat)"
 
 _lock = threading.Lock()
@@ -44,7 +43,7 @@ class Preparing(Exception):
 
 
 def _db_path(dataset):
-    return os.path.join(CACHE_DIR, f"csu_{dataset}.sqlite")
+    return os.path.join(cache_dir(), f"csu_{dataset}.sqlite")
 
 
 def _fresh(dataset):
@@ -78,7 +77,7 @@ def _build(dataset):
     url = CSU_URL.format(kod=dataset)
     path = _db_path(dataset)
     tmp = path + ".tmp"
-    os.makedirs(CACHE_DIR, exist_ok=True)
+    os.makedirs(cache_dir(), exist_ok=True)
     if os.path.exists(tmp):
         os.remove(tmp)
     db = sqlite3.connect(tmp)
@@ -161,11 +160,6 @@ def ensure_index(dataset=CSU_DATASET, wait=False):
             time.sleep(0.2)
         if STATE["status"] == "error":
             raise net.ApiError(f"Data ČSÚ se nepodařilo připravit: {STATE['error']}")
-
-
-def warm_up(dataset=CSU_DATASET):
-    """Dnes nic: velký soubor se stahuje jen jako záloha, když selže API (viz csu_load)."""
-    return None
 
 
 def load_bulk(kod, dataset=CSU_DATASET):
@@ -259,7 +253,7 @@ def parse_jsonstat(d):
 
 
 def _api_cache_path(kod):
-    return os.path.join(CACHE_DIR, f"csu_api_{re.sub(r'[^0-9A-Za-z]', '', str(kod))}.json")
+    return os.path.join(cache_dir(), f"csu_api_{re.sub(r'[^0-9A-Za-z]', '', str(kod))}.json")
 
 
 def load_api(kod, dataset=CSU_DATASET):
@@ -286,7 +280,7 @@ def load_api(kod, dataset=CSU_DATASET):
                 info = {"fetched": date.today().isoformat(), "url": url, "via": "api", "header": [],
                         "territory_columns": [], "other_columns": [], "rows": rows}
                 try:
-                    os.makedirs(CACHE_DIR, exist_ok=True)
+                    os.makedirs(cache_dir(), exist_ok=True)
                     with open(path, "w", encoding="utf-8") as f:
                         json.dump(info, f, ensure_ascii=False)
                 except OSError:

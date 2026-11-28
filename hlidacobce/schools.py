@@ -1,7 +1,7 @@
 """Rejstřík škol a školských zařízení (MŠMT, otevřená data) -> školy a školky zřizované obcí.
 
 EXPERIMENTÁLNÍ: struktura XML je převzata z veřejně dostupných zpracování, naživo ověřena nebyla.
-Parser je tolerantní (hledá značky podle konce názvu). Když selže, lze školu zadat ručně přes IČO.
+Parser je tolerantní (hledá značky podle konce názvu). Je to poslední záložní zdroj po Hlídači státu a ARES.
 """
 import json
 import os
@@ -10,11 +10,11 @@ import threading
 import xml.etree.ElementTree as ET
 from datetime import date
 
-from . import ares, net, webcheck
-from .util import fold, norm_ico
+from . import ares, net
+from .htmlutil import parse_html
+from .util import cache_dir, fold, norm_ico
 
 REJSTRIK_URL = "https://rejstriky.msmt.cz/opendata/vrejcelk.xml"
-CACHE_DIR = os.environ.get("HLIDACOBCE_CACHE", ".hlidacobce_cache")
 INDEX_FILE = "rejstrik_index.json"
 _lock = threading.Lock()
 CACHE_DAYS = 30
@@ -89,7 +89,7 @@ def load_index(force=False):
 
 
 def _load_index(force):
-    path = os.path.join(CACHE_DIR, INDEX_FILE)
+    path = os.path.join(cache_dir(), INDEX_FILE)
     if not force:
         try:
             with open(path, encoding="utf-8") as f:
@@ -104,7 +104,7 @@ def _load_index(force):
         except ET.ParseError as ex:
             raise net.ApiError(f"Rejstřík škol se nepodařilo zpracovat (XML: {ex}).") from ex
     try:
-        os.makedirs(CACHE_DIR, exist_ok=True)
+        os.makedirs(cache_dir(), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump({"fetched": date.today().isoformat(), "index": index}, f, ensure_ascii=False)
     except OSError:
@@ -115,13 +115,13 @@ def _load_index(force):
 HLIDAC_VAZBY = "https://www.hlidacstatu.cz/subjekt/Vazby/{ico}"
 
 
-def schools_from_hlidac(obec_ico):  # noqa: D401
+def schools_from_hlidac(obec_ico):
     """Podřízené organizace obce ze stránky Vazby na Hlídači státu (vedeno podle obchodního rejstříku).
     Z odkazů na subjekty vybere ty, jejichž název vypadá jako škola/školka. Struktura stránky nebyla ověřena naživo."""
     ico = norm_ico(obec_ico)
     _, html = net.fetch_page(HLIDAC_VAZBY.format(ico=ico))
     names = {}
-    for href, text in webcheck.parse_html(html).links:
+    for href, text in parse_html(html).links:
         m = re.search(r"/subjekt/(?:index/)?(\d{8})(?:[/?#]|$)", href, re.I)
         if m and m.group(1) != ico and len(text) > len(names.get(m.group(1), "")):
             names[m.group(1)] = text

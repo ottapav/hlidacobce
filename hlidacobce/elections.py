@@ -4,13 +4,12 @@ Zdroj: otevřená data volby.cz, XML „výsledky jednoho zastupitelstva“ (htt
 dokumentace KV2022_XML). Názvy atributů (ZAPSANI_VOLICI, ODEVZDANE_OBALKY, PLATNE_HLASY…) jsou převzaty ze zavedené konvence
 volby.cz, ale přesné schéma XSD jsem neověřil, proto je čtení tolerantní. Kód zastupitelstva = kód obce (u měst s obvody se liší).
 """
-import re
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 
 from . import net
-from .cards import bars, card, cell_right, table, text, heading, today_str
-from .util import cz_date
+from .cards import bars, card, cell_right, heading, table, today_str
+from .util import thousands
 
 URL = "https://www.volby.cz/pls/kv{year}/vysledky_obec?cislo_obce={kod}"
 YEARS = (2026, 2022, 2018, 2014, 2010)
@@ -69,10 +68,9 @@ def election_card(kod):
     title = "Komunální volby – účast voličů"
     links = [("volby.cz", "https://www.volby.cz"),
              ("Dokumentace XML (KV2022)", "https://volby.gov.cz/opendata/kv2022/KV2022_XML.htm")]
-    if kod:
-        links.insert(1, ("XML výsledků této obce (2022)", URL.format(year=2022, kod=kod)))
     if not kod:
         return card(title, SRC, "error", None, "ARES nevrátil kód obce, výsledky voleb nelze dohledat.", links=links)
+    links.insert(1, ("XML výsledků této obce (2022)", URL.format(year=2022, kod=kod)))
     with ThreadPoolExecutor(max_workers=len(YEARS)) as ex:
         results = sorted(ex.map(lambda y: _fetch(y, kod), YEARS))
     data = [(y, d) for y, d, _ in results if d]
@@ -85,8 +83,7 @@ def election_card(kod):
     cats = [str(y) for y, _ in data]
     voted = [d["voted"] for _, d in data]
     non = [max(d["registered"] - d["voted"], 0) for _, d in data]
-    rows = [[str(y), cell_right(f"{d['registered']:,}".replace(",", " ")), cell_right(f"{d['voted']:,}".replace(",", " ")),
-             cell_right(f"{max(d['registered'] - d['voted'], 0):,}".replace(",", " ")),
+    rows = [[str(y), cell_right(thousands(d["registered"])), cell_right(thousands(d["voted"])), cell_right(thousands(max(d["registered"] - d["voted"], 0))),
              cell_right(f"{100 * d['voted'] / d['registered']:.1f} %")] for y, d in data]
     blocks = [bars("Zapsaní voliči: kolik z nich volilo a kolik ne", cats, [("Volilo", voted), ("Nevolilo", non)], stacked=True, unit="voličů"),
               table(["Volby", "Zapsaných voličů", "Volilo", "Nevolilo", "Účast"], rows)]
@@ -95,7 +92,7 @@ def election_card(kod):
     if parties:
         blocks += [heading(f"Volby {y}: mandáty"),
                    table(["Volební strana / kandidátka", "Hlasů", "Mandátů"],
-                         [[p["name"], cell_right("–" if p["votes"] is None else f"{p['votes']:,}".replace(",", " ")), cell_right(str(p["mandates"]))] for p in parties[:15]])]
+                         [[p["name"], cell_right("–" if p["votes"] is None else thousands(p["votes"])), cell_right(str(p["mandates"]))] for p in parties[:15]])]
     notes = ["Nevolilo = zapsaní voliči minus odevzdané obálky. Zapsaní voliči jsou ti ve stálém seznamu v době voleb.",
              "EXPERIMENTÁLNÍ: struktura XML nebyla ověřena naživo. Údaje porovnejte s volby.cz."]
     if problems:
