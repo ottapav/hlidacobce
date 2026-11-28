@@ -140,14 +140,18 @@ def _decode(raw, content_type):
     return raw.decode("utf-8", "replace")
 
 
-def fetch_page(url, timeout=15, max_bytes=1_500_000):
-    """Stáhne HTML stránku. Vrací (konečná adresa, text)."""
+def fetch_page(url, timeout=15, max_bytes=1_500_000, form=None):
+    """Stáhne HTML stránku (s `form` odešle formulář metodou POST). Vrací (konečná adresa, text)."""
     if DEMO:
         from . import demo
-        return demo.fake_page(url)
+        return demo.fake_page(url, form) if form is not None else demo.fake_page(url)
     check_public_url(url)
     opener = urllib.request.build_opener(_SafeRedirect)
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "text/html,*/*;q=0.5"})
+    body = urllib.parse.urlencode(form).encode("utf-8") if form is not None else None
+    headers = {"User-Agent": UA, "Accept": "text/html,*/*;q=0.5"}
+    if body is not None:
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+    req = urllib.request.Request(url, data=body, headers=headers)
     try:
         with opener.open(req, timeout=timeout) as r:
             ctype = r.headers.get("Content-Type", "")

@@ -140,51 +140,52 @@ def _csi():
             raw = r.read(3000)
         return {"bytes_read": len(raw), "start": raw.decode("utf-8", "replace")[:1500]}
 
-    def profile():
-        with net.open_stream(CSI_CSV, timeout=30) as r:
-            raw = r.read(6000).decode("utf-8", "replace")
-        m = re.search(r"https?://portal\.csicr\.cz[^\s,\";]*", raw)
-        if not m:
-            return {"found_link": None, "csv_start": raw[:300]}
-        final, html = net.fetch_page(m.group(0))
-        p = parse_html(html)
-        text = " ".join(p.parts)
-        ext = [f"{h} | {t[:40]}" for h, t in p.links if re.match(r"https?://", h or "", re.I) and "csicr.cz" not in h]
-        return {"profile_url": m.group(0), "final_url": final, "title": p.title, "html_chars": len(html), "external_links": ext[:15],
-                "emails_or_web_in_text": re.findall(r"[\w.-]+@[\w.-]+|www\.[\w./-]+", text)[:10], "text_start": text[:700],
-                "links": [f"{h} | {t[:40]}" for h, t in p.links[:30]]}
     def form():
         final, html = net.fetch_page(CSI_PORTAL + "Search/School")
         p = parse_html(html)
         return {"final_url": final, "title": p.title, "forms": [
             {"action": f["action"], "method": f["method"],
-             "fields": [{"tag": x["tag"], "name": x["name"], "id": x["id"], "type": x["type"], "value": x["value"][:40],
-                         "options": [f"{v}={t}" for v, t in x["options"][:25]]} for x in f["fields"] if x["type"] != "submit" or x["name"]]}
+             "fields": [{"tag": x["tag"], "name": x["name"], "type": x["type"], "value": x["value"][:40],
+                         "options": [f"{v}={t}" for v, t in x["options"][:25]]} for x in f["fields"] if x["name"] and not x["name"].startswith(("Answer_", "start_", "end_", "txt_"))]}
             for p_ in [p] for f in p_.forms]}
 
     def search():
-        """Zkusí GET vyhledání podle polí, která formulář sám uvádí (Obec + Druh školy). Když je formulář POST, jen to oznámí."""
+        """Odešle formulář vyhledávání (POST) s obcí a druhem zařízení „Mateřské školy“; hodnoty ostatních polí převezme z formuláře."""
         final, html = net.fetch_page(CSI_PORTAL + "Search/School")
-        forms = [f for f in parse_html(html).forms if any("obec" in (x["name"] + x["id"]).lower() for x in f["fields"])]
-        if not forms:
-            return {"error": "formulář s polem Obec nenalezen"}
-        f = forms[0]
-        if f["method"] != "get":
-            return {"method": f["method"], "action": f["action"], "hidden": [x["name"] for x in f["fields"] if x["type"] == "hidden"]}
-        params = {x["name"]: x["value"] for x in f["fields"] if x["name"] and x["tag"] == "input" and x["type"] in ("hidden", "")}
+        f = parse_html(html).forms[0]
+        data = {}
         for x in f["fields"]:
-            low = (x["name"] + x["id"]).lower()
-            if "obec" in low and x["tag"] == "input":
-                params[x["name"]] = "Velký Osek"
-            if x["tag"] == "select" and ("druh" in low or "typ" in low and "zrizovatel" not in low):
-                opt = next((v for v, t in x["options"] if "Mateřské" in t), None)
-                if opt:
-                    params[x["name"]] = opt
-        url = urllib.parse.urljoin(CSI_PORTAL + "Search/School", f["action"] or "") + "?" + urllib.parse.urlencode(params)
-        final2, html2 = net.fetch_page(url)
+            if x["name"] and x["tag"] == "input" and x["type"] in ("hidden", "text") and x["name"] not in data:
+                data[x["name"]] = x["value"]
+        data.update({"a03City": "Velký Osek", "a17UIVCode": "A", "PouzeSkolySVyplnenymProfilem": "false"})
+        url = urllib.parse.urljoin(CSI_PORTAL + "Search/School", f["action"])
+        final2, html2 = net.fetch_page(url, form=data)
         p2 = parse_html(html2)
-        return {"request": url, "title": p2.title, "html_chars": len(html2), "text_start": " ".join(p2.parts)[:600],
-                "links": [f"{h} | {t[:50]}" for h, t in p2.links if re.search(r"school|skola|detail|profil", h or "", re.I)][:20]}
+        profile_links = [(h, t) for h, t in p2.links if re.search(r"/School/\d+", h or "", re.I)]
+        out = {"posted_fields": {k: v for k, v in data.items() if v}, "final_url": final2, "html_chars": len(html2), "title": p2.title,
+               "text_start": " ".join(p2.parts)[:900], "profile_links": [f"{h} | {t[:60]}" for h, t in profile_links[:15]]}
+        if profile_links:
+            _, ph = net.fetch_page(urllib.parse.urljoin(final2, profile_links[0][0]))
+            pp = parse_html(ph)
+            text = " ".join(pp.parts)
+            out["profile"] = {"url": profile_links[0][0], "title": pp.title, "html_chars": len(ph), "text": text[:1500],
+                              "external_links": [f"{h} | {t[:40]}" for h, t in pp.links if re.match(r"https?://", h or "", re.I) and "csicr.cz" not in h][:10],
+                              "emails_or_web": re.findall(r"[\w.-]+@[\w.-]+|www\.[\w./-]+", text)[:10]}
+        return out
+
+    def profile():
+        """Profil školy podle REDIZO z CSV (https://portal.csicr.cz/School/REDIZO)."""
+        with net.open_stream(CSI_CSV, timeout=30) as r:
+            raw = r.read(6000).decode("utf-8", "replace")
+        m = re.search(r"https?://portal\.csicr\.cz/School/\d+", raw)
+        if not m:
+            return {"found_link": None, "csv_start": raw[:300]}
+        final, html = net.fetch_page(m.group(0))
+        p = parse_html(html)
+        text = " ".join(p.parts)
+        return {"profile_url": m.group(0), "final_url": final, "title": p.title, "html_chars": len(html), "text": text[:1500],
+                "external_links": [f"{h} | {t[:40]}" for h, t in p.links if re.match(r"https?://", h or "", re.I) and "csicr.cz" not in h][:10],
+                "emails_or_web": re.findall(r"[\w.-]+@[\w.-]+|www\.[\w./-]+", text)[:10]}
     return [_step("ČŠI: úvodní stránka InspIS PORTÁLu", portal), _step("ČŠI: formulář vyhledávání škol", form), _step("ČŠI: zkušební vyhledání (Velký Osek, MŠ)", search), _step("ČŠI: otevřená data – začátek CSV inspekčních zpráv", csv_head),
             _step("ČŠI: profil školy z PortalLink", profile)]
 

@@ -183,7 +183,7 @@ def _html(title, body, links=()):
     return f"<html><head><title>{title}</title></head><body><nav>{a}</nav><main>{body}</main><script>var x='skolni rad';</script></body></html>"
 
 
-def fake_page(url):
+def fake_page(url, form=None):
     p = urllib.parse.urlparse(url)
     host, path = p.netloc, p.path.rstrip("/") or "/"
     if host == "www.hlidacstatu.cz":
