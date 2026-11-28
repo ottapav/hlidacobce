@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import tempfile
@@ -316,6 +317,19 @@ class TestRefactor(Base):
         self.assertEqual(util.thousands(1234567), "1\u00a0234\u00a0567")
         self.assertEqual(util.find_first({"A": [{"b": {"C": 1}}]}, ["x", "c"]), 1)
         self.assertIsNone(util.find_first({"a": 1}, ["zzz"]))
+
+
+class TestErrors(Base):
+    def test_volby_error_xml(self):
+        xml = b'<VYSLEDKY_OBEC xmlns="http://www.volby.cz/kv/"><CHYBA>Zastupitelstvo neexistuje</CHYBA></VYSLEDKY_OBEC>'
+        with self.assertRaises(elections.ResultError) as cm:
+            elections.parse_result(io.BytesIO(xml))
+        self.assertIn("neexistuje", str(cm.exception))
+
+    def test_http_error_hint(self):
+        import urllib.error
+        ex = urllib.error.HTTPError("https://x.test/a", 500, "err", {}, io.BytesIO(b'{"message":\n "Chyba serveru"}'))
+        self.assertIn("Chyba serveru", net._body_hint(ex))
 
 
 class TestDiag(Base):

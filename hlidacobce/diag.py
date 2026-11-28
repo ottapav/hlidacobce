@@ -6,6 +6,7 @@ Spouští se ručně na /api/selftest; nic neběží periodicky.
 import re
 import time
 import urllib.parse
+from datetime import date, timedelta
 
 from . import ares, contracts, csu, elections, funding, hlidac, net, schools, webcheck
 from .htmlutil import parse_html
@@ -44,7 +45,10 @@ def _hlidac_steps(ico):
     tok = hlidac.token()
     if not tok:
         return [{"step": "Hlídač státu API", "ok": False, "error": "HLIDAC_TOKEN není nastaven"}]
+    since = date.today() - timedelta(days=365)
     steps = [_step("Smlouvy", lambda: _hlidac_path(contracts.SEARCH_PATH, f"ico:{ico}", tok)),
+             _step("Smlouvy (dotaz s datem jako v aplikaci)",
+                   lambda: _hlidac_path(contracts.SEARCH_PATH, f"ico:{ico} AND podepsano:[{since:%Y-%m-%d} TO *]", tok)),
              _step("Dotace", lambda: _hlidac_path(funding.DOTACE_PATH, funding.DOTACE_QUERIES[0].format(ico=ico), tok))]
     for path in funding.ZAKAZKY_PATHS:
         for q in funding.ZAKAZKY_QUERIES:
@@ -56,8 +60,10 @@ def _page_steps(ico):
     def subjekt():
         _, html = net.fetch_page(webcheck.HLIDAC_SUBJEKT.format(ico=ico))
         links = parse_html(html).links
+        ext = [(h, t) for h, t in links if re.match(r"https?://", h or "", re.I) and "hlidacstatu.cz" not in h]
         return {"html_chars": len(html), "links": len(links), "web_candidates": webcheck.find_site(ico, "")["status"],
-                "labels_found": sum(1 for _, t in links if webcheck.LABEL.search(webcheck.fold(t)))}
+                "labels_found": sum(1 for _, t in links if webcheck.LABEL.search(webcheck.fold(t))),
+                "external_links": [f"{h} | {t[:40]}" for h, t in ext[:15]]}
 
     def vazby():
         _, html = net.fetch_page(schools.HLIDAC_VAZBY.format(ico=ico))
@@ -76,7 +82,7 @@ def _volby(kod):
                 raw = r.read(40000)
             m = re.findall(rb"<(\w+)([^>]*)>", raw[:4000])
             return {"bytes_read": len(raw), "first_tags": [f"{t.decode()} {a.decode()[:120]}".strip() for t, a in m[:6]],
-                    "has_ZAPSANI_VOLICI": b"ZAPSANI_VOLICI" in raw}
+                    "has_ZAPSANI_VOLICI": b"ZAPSANI_VOLICI" in raw, "raw_start": " ".join(raw[:500].decode("utf-8", "replace").split())}
         return _step(f"volby.cz {year}", run)
     return [one(y) for y in (2022, 2018)]
 
@@ -102,6 +108,27 @@ def _ares(ico, kod):
     return [_step("ARES: základní údaje", basic), _step("ARES: příspěvkové organizace se sídlem v obci", seat)]
 
 
+def _msmt_index():
+    _, html = net.fetch_page("https://rejstriky.msmt.cz/opendata/")
+    links = [(h, t) for h, t in parse_html(html).links if re.search(r"\.(xml|zip|csv|gz)\b|opendata", h or "", re.I)]
+    return {"html_chars": len(html), "links": [f"{h} | {t[:40]}" for h, t in links[:25]]}
+
+
+def _wikidata(ico, name):
+    """Průzkum: má Wikidata u obce oficiální web (P856) a podle které vlastnosti jde najít obec přes IČO?"""
+    q = urllib.parse.urlencode({"action": "wbsearchentities", "search": name, "language": "cs", "format": "json", "limit": 5})
+    found = net.http_json(f"https://www.wikidata.org/w/api.php?{q}", retries=1, timeout=20).get("search", [])
+    out = []
+    for e in found[:3]:
+        ent = net.http_json(f"https://www.wikidata.org/wiki/Special:EntityData/{e['id']}.json", retries=1, timeout=20)["entities"][e["id"]]
+        claims = ent.get("claims", {})
+        web = [c.get("mainsnak", {}).get("datavalue", {}).get("value") for c in claims.get("P856", [])]
+        ids = {p: [c.get("mainsnak", {}).get("datavalue", {}).get("value") for c in cs][:2] for p, cs in claims.items()
+               if any(str(c.get("mainsnak", {}).get("datavalue", {}).get("value")) in (ico, ico.lstrip("0")) for c in cs)}
+        out.append({"id": e["id"], "label": e.get("label"), "description": e.get("description"), "P856_web": web, "properties_with_ico": ids})
+    return {"entities": out}
+
+
 def _msmt():
     def head():
         with net.open_stream(schools.REJSTRIK_URL, timeout=30) as r:
@@ -121,5 +148,6 @@ def selftest(ico=DEFAULT_ICO):
     steps += _hlidac_steps(ico) + _page_steps(ico)
     if kod:
         steps += _volby(kod) + _csu(kod)
-    steps += _msmt()
+    steps += [_step("MŠMT: stránka s otevřenými daty", _msmt_index)] + _msmt()
+    steps.append(_step("Wikidata: web obce", lambda: _wikidata(ico, steps[0].get("name", "").replace("Obec ", "").replace("Město ", ""))))
     return {"ico": ico, "kod_obce": kod, "demo": net.DEMO, "ok": sum(1 for s in steps if s["ok"]), "failed": sum(1 for s in steps if not s["ok"]), "steps": steps}

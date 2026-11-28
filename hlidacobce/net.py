@@ -44,11 +44,13 @@ def http_json(url, headers=None, data=None, retries=3, timeout=30):
                 return json.loads(r.read().decode("utf-8"))
         except urllib.error.HTTPError as ex:
             if ex.code in (400, 401, 403, 404):
-                raise ApiError(f"HTTP {ex.code} při volání {_host(url)}", ex.code) from ex
+                raise ApiError(f"HTTP {ex.code} při volání {_host(url)}{_body_hint(ex)}", ex.code) from ex
             last = ex
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as ex:
             last = ex
         time.sleep(1.5 * (attempt + 1))
+    if isinstance(last, urllib.error.HTTPError):
+        raise ApiError(f"Zdroj {_host(url)} vrátil HTTP {last.code}{_body_hint(last)}", last.code)
     raise ApiError(f"Zdroj {_host(url)} není dostupný ({type(last).__name__})")
 
 
@@ -89,6 +91,16 @@ def open_stream(url, timeout=180):
         raise ApiError(f"Soubor z {_host(url)} se nepodařilo stáhnout ({type(ex).__name__})") from ex
     src = gzip.GzipFile(fileobj=resp) if resp.headers.get("Content-Encoding", "").lower() == "gzip" else resp
     return io.BufferedReader(_Raw(src, resp), 1 << 20)
+
+
+def _body_hint(ex):
+    """Začátek těla chybové odpovědi (např. text chyby API) – jen pro diagnostiku, zkrácený a bez zalomení."""
+    try:
+        body = ex.read(300).decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001
+        return ""
+    body = " ".join(body.split())
+    return f": {body}" if body else ""
 
 
 def _host(url):

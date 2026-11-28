@@ -23,9 +23,17 @@ def _num(v):
         return None
 
 
+class ResultError(Exception):
+    """volby.cz vrátily XML s elementem CHYBA (např. neplatné číslo zastupitelstva)."""
+
+
 def parse_result(stream):
-    """Vrací {registered, voted, valid, name, parties:[{name,votes,mandates}]} nebo None, pokud chybí údaje o účasti."""
+    """Vrací {registered, voted, valid, name, parties:[{name,votes,mandates}]} nebo None, pokud chybí údaje o účasti.
+    Když server vrátí chybové XML (element CHYBA), vyvolá ResultError s jeho textem."""
     root = ET.parse(stream).getroot()
+    for el in root.iter():
+        if el.tag.rsplit("}", 1)[-1].upper() == "CHYBA":
+            raise ResultError(" ".join(filter(None, [(el.text or "").strip(), *(f"{k}={v}" for k, v in el.attrib.items())])) or "bez popisu")
     ucast = []
     for el in root.iter():
         a = {k.upper(): v for k, v in el.attrib.items()}
@@ -60,6 +68,8 @@ def _fetch(year, kod):
             return year, parse_result(r), None
     except net.ApiError as ex:
         return year, None, ("nekonalo se" if ex.code in (400, 404) else str(ex))
+    except ResultError as ex:
+        return year, None, f"volby.cz vrátily chybu: {ex}"
     except ET.ParseError:
         return year, None, "odpověď není platné XML (volby se v obci nemusely konat)"
 

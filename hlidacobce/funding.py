@@ -51,8 +51,8 @@ def norm_subsidy(raw):
         year = d.year if d else None
     return {"year": year,
             "amount": num(find_first(raw, ["castkaSchvalena", "schvalenaCastka", "subsidyAmount", "castkaRozhodnuta", "vyseDotace", "castka", "amount"])),
-            "project": _text(find_first(raw, ["nazevProjektu", "projectName", "projekt", "nazev"])),
-            "program": _text(find_first(raw, ["nazevProgramu", "programName", "dotacniProgram", "program"])),
+            "project": _text(find_first(raw, ["nazevProjektu", "projectName", "displayProject", "projectDescription", "projekt", "nazev"])),
+            "program": _text(find_first(raw, ["nazevProgramu", "programName", "dotacniProgram", "program", "category"])),
             "provider": _text(find_first(raw, ["poskytovatelNazev", "subsidyProvider", "poskytovatel", "dotacePoskytovatel"]))}
 
 
