@@ -121,7 +121,45 @@ def _web(ico, name):
     return _step("Web: kandidáti a ověření (Wikidata + Hlídač)", run)
 
 
-def selftest(ico=DEFAULT_ICO):
+CSI_PORTAL = "https://portal.csicr.cz/"
+CSI_CSV = "https://opendata.csicr.cz/Transformation/Download/137"  # otevřená data ČŠI: inspekční zprávy (REDIZO, Jmeno, DatumOd, DatumDo, LinkIZ, PortalLink)
+
+
+def _csi():
+    """Průzkum ČŠI: (1) úvodní stránka InspIS PORTÁLU, (2) začátek CSV s inspekčními zprávami, (3) profil jedné školy z PortalLink
+    – hledáme kontakty a web a způsob, jak najít školy podle obce a typu zařízení."""
+    def portal():
+        final, html = net.fetch_page(CSI_PORTAL)
+        p = parse_html(html)
+        return {"final_url": final, "title": p.title, "html_chars": len(html), "text_start": " ".join(p.parts)[:500],
+                "links": [f"{h} | {t[:40]}" for h, t in p.links[:40]]}
+
+    def csv_head():
+        with net.open_stream(CSI_CSV, timeout=30) as r:
+            raw = r.read(3000)
+        return {"bytes_read": len(raw), "start": raw.decode("utf-8", "replace")[:1500]}
+
+    def profile():
+        with net.open_stream(CSI_CSV, timeout=30) as r:
+            raw = r.read(6000).decode("utf-8", "replace")
+        m = re.search(r"https?://portal\.csicr\.cz[^\s,\";]*", raw)
+        if not m:
+            return {"found_link": None, "csv_start": raw[:300]}
+        final, html = net.fetch_page(m.group(0))
+        p = parse_html(html)
+        text = " ".join(p.parts)
+        ext = [f"{h} | {t[:40]}" for h, t in p.links if re.match(r"https?://", h or "", re.I) and "csicr.cz" not in h]
+        return {"profile_url": m.group(0), "final_url": final, "title": p.title, "html_chars": len(html), "external_links": ext[:15],
+                "emails_or_web_in_text": re.findall(r"[\w.-]+@[\w.-]+|www\.[\w./-]+", text)[:10], "text_start": text[:700],
+                "links": [f"{h} | {t[:40]}" for h, t in p.links[:30]]}
+    return [_step("ČŠI: úvodní stránka InspIS PORTÁLu", portal), _step("ČŠI: otevřená data – začátek CSV inspekčních zpráv", csv_head),
+            _step("ČŠI: profil školy z PortalLink", profile)]
+
+
+def selftest(ico=DEFAULT_ICO, only=""):
+    if only == "csi":  # rychlý průzkum jen ČŠI
+        steps = _csi()
+        return {"only": "csi", "ok": sum(1 for s in steps if s["ok"]), "failed": sum(1 for s in steps if not s["ok"]), "steps": steps}
     ico = norm_ico(ico) or DEFAULT_ICO
     steps = _ares(ico, "0")[:1]
     kod = steps[0].get("kod_obce") or ""
@@ -133,4 +171,5 @@ def selftest(ico=DEFAULT_ICO):
     if kod:
         steps += _volby(kod) + _csu(kod)
     steps.append(_web(ico, steps[0].get("name", "")))
+    steps += _csi()
     return {"ico": ico, "kod_obce": kod, "demo": net.DEMO, "ok": sum(1 for s in steps if s["ok"]), "failed": sum(1 for s in steps if not s["ok"]), "steps": steps}

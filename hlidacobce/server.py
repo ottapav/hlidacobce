@@ -140,7 +140,7 @@ class Handler(BaseHTTPRequestHandler):
             if not _slots.acquire(timeout=20):
                 return self._json({"error": "Server je teď vytížený, zkuste to za chvíli."}, 503)
             try:
-                return self._json(diag.selftest(q.get("ico", "")))
+                return self._json(diag.selftest(q.get("ico", ""), q.get("only", "")))
             finally:
                 _slots.release()
         if route == "schools":
