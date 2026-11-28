@@ -3,6 +3,7 @@
 Slouží k ověření předpokladů o cizích API přímo z nasazení (shell vývojáře k nim často nemá přístup). Token se nikdy nevypisuje.
 Spouští se ručně na /api/selftest; nic neběží periodicky.
 """
+import io
 import re
 import time
 from datetime import date, timedelta
@@ -13,7 +14,6 @@ from .util import find_first, norm_ico
 
 DEFAULT_ICO = "00235873"  # Velký Osek – jen výchozí vzorek pro diagnostiku
 BIG_ICO = "00064581"  # Hlavní město Praha: zadavatel, který má zakázky určitě
-EXTRA_ZAKAZKY_PATHS = ("/VerejneZakazky/Vyhledat", "/VerejneZakazky/Search", "/VZ/Hledat", "/Zakazky/Vyhledat")
 
 
 def _shape(data, depth=0):
@@ -50,7 +50,7 @@ def _hlidac_steps(ico):
              _step("Smlouvy (dotaz s datem jako v aplikaci)",
                    lambda: _hlidac_path(contracts.SEARCH_PATH, f"ico:{ico} AND podepsano:[{since:%Y-%m-%d} TO *]", tok)),
              _step("Dotace", lambda: _hlidac_path(funding.DOTACE_PATH, funding.DOTACE_QUERIES[0].format(ico=ico), tok))]
-    for path in funding.ZAKAZKY_PATHS + EXTRA_ZAKAZKY_PATHS:
+    for path in funding.ZAKAZKY_PATHS:
         steps.append(_step(f"Zakázky {path} (obec)", lambda p=path: _hlidac_path(p, funding.ZAKAZKY_QUERIES[0].format(ico=ico), tok)))
         steps.append(_step(f"Zakázky {path} (velký zadavatel: Praha)", lambda p=path: _hlidac_path(p, funding.ZAKAZKY_QUERIES[0].format(ico=BIG_ICO), tok)))
     return steps
@@ -78,10 +78,18 @@ def _volby(kod):
         def run():
             with net.open_stream(elections.result_url(year, kod, datum), timeout=30) as r:
                 raw = r.read(60000)
-            return {"bytes_read": len(raw), "has_ZAPSANI_VOLICI": b"ZAPSANI_VOLICI" in raw,
-                    "raw_start": " ".join(raw[:700].decode("utf-8", "replace").split())}
+            out = {"bytes_read": len(raw), "has_ZAPSANI_VOLICI": b"ZAPSANI_VOLICI" in raw}
+            try:
+                res = elections.parse_result(io.BytesIO(raw))
+                out["parsed"] = {"registered": res["registered"], "voted": res["voted"], "parties": len(res["parties"]),
+                                 "party_sample": res["parties"][:3]} if res else None
+            except elections.ResultError as ex:
+                out["server_error"] = str(ex)
+            tail = raw[raw.find(b"<VOLEBNI_STRANA"):][:600] if b"<VOLEBNI_STRANA" in raw else b""
+            out["party_xml_sample"] = " ".join(tail.decode("utf-8", "replace").split())
+            return out
         return _step(f"volby.cz {year} datumvoleb={datum or '-'}", run)
-    return [one(y, d) for y in (2022, 2018, 2026) for d in (*elections.DATES[y], "")]
+    return [one(y, d) for y, d in elections.DATES.items()]
 
 
 def _csu(kod):

@@ -78,12 +78,12 @@ class TestModules(Base):
         c = elections.election_card(demo.KOD_OBCE)
         self.assertEqual(c["status"], "info")
         chart = c["blocks"][0]
-        self.assertEqual((chart["type"], chart["stacked"], chart["categories"]), ("bars", True, ["2018", "2022", "2026"]))
+        self.assertEqual((chart["type"], chart["stacked"], chart["categories"]), ("bars", True, ["2018", "2022"]))
         voted, non = chart["series"][0]["values"], chart["series"][1]["values"]
-        self.assertEqual(voted, [1010, 1180, 1240])
-        self.assertEqual(non, [890, 770, 770])  # zapsaní (1900, 1950, 2010) minus volilo
-        self.assertEqual([r[0] for r in c["blocks"][1]["rows"]], ["2018", "2022", "2026"])
-        self.assertEqual(c["blocks"][1]["rows"][2][4]["text"], "61.7 %")
+        self.assertEqual(voted, [1010, 1180])
+        self.assertEqual(non, [890, 770])  # zapsaní (1900, 1950) minus volilo
+        self.assertEqual([r[0] for r in c["blocks"][1]["rows"]], ["2018", "2022"])
+        self.assertEqual(c["blocks"][1]["rows"][1][4]["text"], "60.5 %")
         parties = c["blocks"][-1]["rows"]
         self.assertEqual(parties[0][0], "Sdružení nezávislých Ukázkov")
         self.assertNotIn("2014", " ".join(c["notes"]))  # rok, kdy se volby nekonaly/neexistují, není chyba
@@ -103,9 +103,11 @@ class TestModules(Base):
         self.assertEqual((by_year["type"], by_year["categories"]), ("bars", ["2019", "2020", "2021", "2022", "2023"]))
         self.assertEqual(by_year["series"][0]["values"][-1], 750000.0)
         self.assertEqual(c["blocks"][3]["rows"][0][1], "Kanalizace Ukázkov")
-        t = funding.tender_card(demo.OBEC_ICO)  # první cesta v demo vrací 404 -> použije se záložní
+        t = funding.tender_card(demo.OBEC_ICO)  
         self.assertEqual(t["blocks"][0]["rows"][0], ["Počet zakázek", "4"])
         self.assertEqual(t["blocks"][-1]["rows"][0][1]["text"], "Stavební úpravy ZŠ")  # nejnovější první
+        self.assertEqual(t["blocks"][-1]["rows"][0][3], "Stavební práce")
+        self.assertEqual(t["blocks"][-1]["rows"][0][1]["url"], "https://zakazky.demo/0")
         self.assertEqual(funding.subsidy_card("55555555")["status"], "warn")
 
     def test_funding_without_token(self):
@@ -303,10 +305,11 @@ class TestResilience(Base):
         finally:
             net.http_json = orig
 
-    def test_elections_try_second_date(self):
-        c = elections.election_card(demo.KOD_OBCE)  # demo má pro 2018 data jen u druhého dne voleb
+    def test_elections_use_first_election_day(self):
+        c = elections.election_card(demo.KOD_OBCE)
         self.assertEqual(c["status"], "info")
-        self.assertIn("2018", [r[0] for r in c["blocks"][1]["rows"]])
+        self.assertEqual([r[0] for r in c["blocks"][1]["rows"]], ["2018", "2022"])
+        self.assertIn("datumvoleb=20220923", elections.result_url(2022, "1", elections.DATES[2022]))
 
     def test_elections_server_error_text(self):
         c = elections.election_card("123456")

@@ -1,7 +1,7 @@
-"""Dotace a veřejné zakázky z Hlídače státu (REST API v2). EXPERIMENTÁLNÍ.
+"""Dotace a veřejné zakázky z Hlídače státu (REST API v2).
 
-Cesty, parametry dotazu a názvy polí jsem naživo neověřil (dokumentace REST API nebyla dostupná). Proto jsou cesty a varianty dotazu
-konstanty níže a pole se hledají tolerantně v celé (i vnořené) odpovědi. Když API nevrátí použitelná data, karta to řekne a odkáže na web.
+Cesty a dotazy jsou ověřeny naživo (selftest): /Dotace/Hledat s `ico:`, /VZ/Hledat s `icozadavatel:`. Pole se přesto hledají tolerantně
+v celé (i vnořené) odpovědi, protože struktura je hluboká a může se měnit. Když API nevrátí použitelná data, karta to řekne a odkáže na web.
 """
 from collections import defaultdict
 from datetime import date
@@ -13,9 +13,9 @@ from .util import czk, cz_date, find_first, num, parse_date
 SRC = "Hlídač státu – Dotace"
 SRC_Z = "Hlídač státu – Veřejné zakázky"
 DOTACE_PATH = "/Dotace/Hledat"
-ZAKAZKY_PATHS = ("/VerejneZakazky/Hledat", "/Zakazky/Hledat")
+ZAKAZKY_PATHS = ("/VZ/Hledat",)
 DOTACE_QUERIES = ("ico:{ico}",)
-ZAKAZKY_QUERIES = ("icozadavatel:{ico}", "ico:{ico}")
+ZAKAZKY_QUERIES = ("icozadavatel:{ico}",)
 MAX_PAGES = 20
 
 
@@ -82,20 +82,19 @@ def subsidy_card(ico):
                      [[str(s["year"] or "–"), s["project"][:90], s["program"][:60], s["provider"][:50], cell_right(czk(s["amount"]))] for s in top],
                      "Žádná dotace s uvedenou částkou." if subs else "Hlídač státu žádné dotace neeviduje.")]
     return card(title, SRC, "info" if subs else "warn", today_str(), "Dotace, kde je subjekt příjemcem (podle IČO).", blocks, links,
-                ["EXPERIMENTÁLNÍ: cesta API a názvy polí nebyly ověřeny naživo; porovnejte součty s webem Hlídače státu.",
-                 "Částky jsou podle rozhodnutí o dotaci, ne nutně skutečně vyplacené."])
+                ["Částky jsou podle rozhodnutí o dotaci (pole subsidyAmount), ne nutně skutečně vyplacené. Porovnejte součty s webem Hlídače státu."])
 
 
 # ------------------------------------------------------------------ zakázky
 def norm_tender(raw):
     d = parse_date(find_first(raw, ["datumUverejneni", "datumZahajeni", "datumZverejneni", "datum", "publicationDate"]))
     return {"date": d,
-            "name": _text(find_first(raw, ["nazevZakazky", "nazev", "name", "predmet"])),
+            "name": _text(find_first(raw, ["nazevVerejneZakazky", "nazevZakazky", "nazevVz", "nazev", "name", "popisPredmetu"])),
             "value": num(find_first(raw, ["konecnaHodnotaBezDph", "hodnotaBezDph", "finalPrice", "predpokladanaHodnotaBezDph",
                                           "predpokladanaHodnota", "hodnota", "cena"])),
-            "supplier": _text(find_first(raw, ["dodavatele", "vitezove", "winners", "dodavatel"])),
-            "state": _text(find_first(raw, ["stav", "stavVz", "state"])),
-            "url": next((u for u in [find_first(raw, ["url", "odkaz", "detailUrl"])] if isinstance(u, str) and u.startswith("http")), "")}
+            "supplier": _text(find_first(raw, ["nazvyDodavatelu", "dodavatele", "vitezove", "winners", "dodavatel"])),
+            "kind": _text(find_first(raw, ["druhVerejneZakazkyOriginal"])),
+            "url": next((u for u in [find_first(raw, ["zakazkaUrl", "url", "odkaz", "detailUrl"])] if isinstance(u, str) and u.startswith("http")), "")}
 
 
 def tender_card(ico):
@@ -105,24 +104,29 @@ def tender_card(ico):
     if not tok:
         return hlidac.missing_token_card(title, SRC_Z, "zakázky")
     try:
-        raw, q = fetch_all(ZAKAZKY_PATHS, ZAKAZKY_QUERIES, tok, ico)
+        raw, _ = fetch_all(ZAKAZKY_PATHS, ZAKAZKY_QUERIES, tok, ico)
     except net.ApiError as ex:
         return card(title, SRC_Z, "error", None, str(ex), links=links)
     ts = [norm_tender(r) for r in raw]
     total = sum(t["value"] for t in ts if t["value"])
-    by_year = defaultdict(float)
+    by_year, count_year = defaultdict(float), defaultdict(int)
     for t in ts:
-        if t["date"] and t["value"]:
-            by_year[t["date"].year] += t["value"]
+        if t["date"]:
+            count_year[t["date"].year] += 1
+            if t["value"]:
+                by_year[t["date"].year] += t["value"]
     blocks = [kv([("Počet zakázek", len(ts)), ("z toho s uvedenou hodnotou", sum(1 for t in ts if t["value"])), ("Součet hodnot", czk(total))])]
     if len(by_year) >= 2:
         ys = sorted(by_year)
         blocks.append(bars("Hodnota zakázek podle roku zveřejnění (Kč)", ys, [("Hodnota", [by_year[y] for y in ys])], unit="Kč"))
+    elif len(count_year) >= 2:  # hodnoty často chybí (malé zakázky), počty podle roku jsou vždy k dispozici
+        ys = sorted(count_year)
+        blocks.append(bars("Počet zakázek podle roku zveřejnění", ys, [("Počet", [count_year[y] for y in ys])], unit="zakázek"))
     latest = sorted(ts, key=lambda t: t["date"] or date.min, reverse=True)[:10]
     blocks += [heading("10 nejnovějších zakázek"),
-               table(["Zveřejněno", "Zakázka", "Dodavatel", "Stav", "Hodnota"],
-                     [[cz_date(t["date"]), cell_link(t["name"][:90], t["url"]) if t["url"] else t["name"][:90], t["supplier"][:50], t["state"][:30], cell_right(czk(t["value"]))]
+               table(["Zveřejněno", "Zakázka", "Dodavatel", "Druh", "Hodnota"],
+                     [[cz_date(t["date"]), cell_link(t["name"][:90], t["url"]) if t["url"] else t["name"][:90], t["supplier"][:50], t["kind"][:30], cell_right(czk(t["value"]))]
                       for t in latest], "Hlídač státu žádné zakázky neeviduje.")]
     return card(title, SRC_Z, "info" if ts else "warn", today_str(), "Zakázky, kde je subjekt zadavatelem (podle IČO).", blocks, links,
-                [f"Použitý dotaz: {q}",
-                 "EXPERIMENTÁLNÍ: cesta API, dotaz a názvy polí nebyly ověřeny naživo; porovnejte s webem Hlídače státu."])
+                ["Hodnota zakázky je často neuvedená (hlavně u malých zakázek); součty proto berte jako dolní odhad.",
+                 "Pole zakázek se čtou tolerantně; porovnejte s webem Hlídače státu."])

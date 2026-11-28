@@ -74,13 +74,10 @@ def fake_json(url, data):
         m = re.search(r'P4156\s+"(\d{8})"', urllib.parse.parse_qs(path.query).get("query", [""])[0])
         web = WIKIDATA.get(m.group(1)) if m else None
         return {"results": {"bindings": [{"web": {"type": "uri", "value": web}}] if web else []}}
-    if "hlidacstatu.cz" in path.netloc and ("/Dotace/" in path.path or "/Zakazky/" in path.path or "/VerejneZakazky/" in path.path):
-        from . import net
+    if "hlidacstatu.cz" in path.netloc and ("/Dotace/" in path.path or "/VZ/" in path.path):
         q = urllib.parse.parse_qs(path.query)
         m = re.search(r"(\d{8})", q.get("dotaz", [""])[0])
         ico = m.group(1) if m else ""
-        if "/VerejneZakazky/" in path.path:  # ukázka záložní cesty: první varianta neexistuje
-            raise net.ApiError("HTTP 404", 404)
         page = int(q.get("strana", ["1"])[0])
         items = (_subsidies() if "/Dotace/" in path.path else _tenders()) if ico in (OBEC_ICO, SKOLA_ICO) else []
         if ico == SKOLA_ICO:
@@ -130,11 +127,14 @@ def _subsidies():
 
 
 def _tenders():
-    return [{"id": f"z{i}", "nazevZakazky": n, "datumUverejneni": _d(d), "konecnaHodnotaBezDph": v, "stav": st,
-             "dodavatele": [{"nazev": sup}] if sup else [], "url": f"https://www.hlidacstatu.cz/verejnezakazky/demo{i}"}
-            for i, (n, d, v, st, sup) in enumerate([
-                ("Stavební úpravy ZŠ", 60, 4_200_000, "Zadáno", "Nová Stavební a.s."), ("Svoz odpadu", 200, 950_000, "Zadáno", "Odpady s.r.o."),
-                ("Nákup traktoru", 400, None, "Zahájeno", ""), ("Oprava mostu", 700, 7_800_000, "Zadáno", "Mosty a.s.")])]
+    """Struktura podle skutečné odpovědi /VZ/Hledat (souhrn.*, nazevVerejneZakazky, originaly[].zakazkaUrl)."""
+    return [{"id": f"z{i}", "nazevVerejneZakazky": n, "druhVerejneZakazkyOriginal": druh,
+             "souhrn": {"icoZadavatele": OBEC_ICO, "datumUverejneni": _d(d), "konecnaHodnotaBezDPH": v, "stav": 1, "mena": "CZK",
+                        "nazvyDodavatelu": [sup] if sup else [], "icaDodavatelu": []},
+             "originaly": [{"profilUrl": None, "zakazkaUrl": f"https://zakazky.demo/{i}"}]}
+            for i, (n, d, v, druh, sup) in enumerate([
+                ("Stavební úpravy ZŠ", 60, 4_200_000, "Stavební práce", "Nová Stavební a.s."), ("Svoz odpadu", 200, 950_000, "Služby", "Odpady s.r.o."),
+                ("Nákup traktoru", 400, None, "Dodávky", ""), ("Oprava mostu", 700, 7_800_000, "Stavební práce", "Mosty a.s.")])]
 
 
 def _school_contracts():
@@ -151,7 +151,7 @@ CSV = ("hodnota,pohlavi_txt,vek_txt,rok,uzemi_kod,uzemi_txt\n" +
        "7,muži,0–14,2024,111111,Jinde\n"
        f",muži,0–14,2024,{KOD_OBCE},Ukázkov\n")  # prázdná hodnota se nesmí zobrazit
 
-VOLBY_DATA = {2018: "20181006", 2022: "20220923", 2026: "20261002"}  # datumvoleb, pro které demo vrací výsledky (jinak chybové XML jako volby.cz)
+VOLBY_DATA = {2018: "20181005", 2022: "20220923"}  # datumvoleb, pro které demo vrací výsledky (jinak chybové XML jako volby.cz)
 
 
 def _vysledky_obec(year, kod, datum=""):
@@ -162,11 +162,11 @@ def _vysledky_obec(year, kod, datum=""):
         return ('<?xml version="1.0" encoding="utf-8"?><VYSLEDKY_OBEC xmlns="http://www.volby.cz/kv/">'
                 '<CHYBA>V aktuálních volbách se v obci nevolí</CHYBA></VYSLEDKY_OBEC>').encode("utf-8")
     reg, voted = {2018: (1900, 1010), 2022: (1950, 1180), 2026: (2010, 1240)}[year]
-    return (f'<?xml version="1.0" encoding="utf-8"?><KV_VYSLEDKY_OBEC xmlns="http://www.volby.cz/kv/"><OBEC CIS_OBEC="{kod}" NAZ_OBEC="Ukázkov">'
+    return (f'<?xml version="1.0" encoding="utf-8"?><VYSLEDKY_OBEC xmlns="http://www.volby.cz/kv/"><OBEC KODZASTUP="{kod}" NAZEVZAST="Ukázkov" JE_SPOCTENO="true"><VYSLEDEK>'
             f'<UCAST OKRSKY_CELKEM="2" ZAPSANI_VOLICI="{reg}" VYDANE_OBALKY="{voted}" UCAST_PROC="{100 * voted / reg:.2f}" ODEVZDANE_OBALKY="{voted}" PLATNE_HLASY="{voted * 8}"/>'
-            '<STRANA KSTRANA="1" NAZ_STR="Sdružení nezávislých Ukázkov" HLASY="5200" MANDATY="5"/>'
-            '<STRANA KSTRANA="2" NAZ_STR="Občané pro Ukázkov" HLASY="3100" MANDATY="3"/>'
-            '<STRANA KSTRANA="3" NAZ_STR="Zelení" HLASY="900" MANDATY="1"/></OBEC></KV_VYSLEDKY_OBEC>').encode("utf-8")
+            '<VOLEBNI_STRANA VSTRANA="1" NAZEV_STRANY="Sdružení nezávislých Ukázkov" HLASY="5200" MANDATY="5"/>'
+            '<VOLEBNI_STRANA VSTRANA="2" NAZEV_STRANY="Občané pro Ukázkov" HLASY="3100" MANDATY="3"/>'
+            '<VOLEBNI_STRANA VSTRANA="3" NAZEV_STRANY="Zelení" HLASY="900" MANDATY="1"/></VYSLEDEK></OBEC></VYSLEDKY_OBEC>').encode("utf-8")
 
 
 def fake_stream(url):
