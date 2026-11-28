@@ -8,7 +8,7 @@ import urllib.request
 os.environ["HLIDACOBCE_CACHE"] = tempfile.mkdtemp()
 os.environ["HLIDAC_TOKEN"] = "demo-token"
 
-from hlidacobce import contracts, csu, demo, elections, funding, hlidac, net, schools, server, tabs, util, webcheck  # noqa: E402
+from hlidacobce import contracts, csu, demo, diag, elections, funding, hlidac, net, schools, server, tabs, util, webcheck  # noqa: E402
 
 
 class Base(unittest.TestCase):
@@ -316,6 +316,15 @@ class TestRefactor(Base):
         self.assertEqual(util.thousands(1234567), "1\u00a0234\u00a0567")
         self.assertEqual(util.find_first({"A": [{"b": {"C": 1}}]}, ["x", "c"]), 1)
         self.assertIsNone(util.find_first({"a": 1}, ["zzz"]))
+
+
+class TestDiag(Base):
+    def test_selftest_demo(self):
+        d = diag.selftest(demo.OBEC_ICO)
+        self.assertEqual(d["ico"], demo.OBEC_ICO)
+        self.assertTrue(d["steps"])
+        self.assertNotIn("demo-token", json.dumps(d))
+        self.assertGreater(d["ok"], 3)
 
 
 class TestServer(Base):

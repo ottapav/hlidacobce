@@ -10,7 +10,7 @@ import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import __version__, ares, csu, hlidac, net, tabs
+from . import __version__, ares, csu, diag, hlidac, net, tabs
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
 TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "application/javascript; charset=utf-8"}
@@ -136,6 +136,13 @@ class Handler(BaseHTTPRequestHandler):
             except net.ApiError as ex:
                 return self._json({"error": f"ARES: {ex}"})
             return self._json(csu.diagnose(kod))
+        if route == "selftest":  # ruční ověření všech externích zdrojů z nasazení (struktura odpovědí, žádná data ani token)
+            if not _slots.acquire(timeout=20):
+                return self._json({"error": "Server je teď vytížený, zkuste to za chvíli."}, 503)
+            try:
+                return self._json(diag.selftest(q.get("ico", "")))
+            finally:
+                _slots.release()
         if route == "schools":
             ico = self._ico(q, "obec")
             if not ico:

@@ -43,6 +43,7 @@ Veřejná instance používá váš token Hlídače státu, proto je zapnutý li
 | `ares.py`, `hlidac.py`, `schools.py` | klienti zdrojů: ARES, sdílený klient Hlídače státu, školy (Hlídač → ARES → rejstřík MŠMT) |
 | `contracts.py`, `funding.py`, `elections.py`, `csu.py`, `webcheck.py`, `sources.py` | jednotlivé zdroje, každý vrací karty |
 | `tabs.py` | skládá karty do záložek; každý zdroj je izolovaný (chyba jedné karty neshodí záložku) a nezávislé zdroje běží souběžně |
+| `diag.py` | samodiagnostika `/api/selftest?ico=…`: z nasazení zkusí každý externí zdroj a vrátí strukturu odpovědí (bez dat a tokenu) |
 | `server.py`, `static/` | HTTP server, omezení požadavků, UI |
 
 Nový zdroj = nová funkce vracející kartu (nebo seznam karet) a jeden řádek v příslušné `tab_*` v `tabs.py`.
