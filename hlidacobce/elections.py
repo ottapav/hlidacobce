@@ -6,6 +6,7 @@ Struktura ověřena naživo (Velký Osek 2018 a 2022): OBEC > VYSLEDEK > UCAST (
 a VOLEBNI_STRANA (NAZEV_STRANY, HLASY). Bez parametru datumvoleb server vrací jen „aktuální volby“, proto se zadává první den voleb.
 Čtení je přesto tolerantní (u atributů s mandáty jsem přesný název neověřil). Kód zastupitelstva = kód obce (u měst s obvody se liší).
 """
+import re
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 
@@ -13,12 +14,13 @@ from . import net
 from .cards import bars, card, cell_right, heading, table, today_str
 from .util import thousands
 
-URL = "https://www.volby.cz/pls/kv{year}/vysledky_obec?cislo_obce={kod}"
-# Bez parametru datumvoleb server vrací jen „aktuální volby“ (naživo ověřeno: chyba „V aktuálních volbách se v obci nevolí“). Správný je
-# PRVNÍ den voleb (ověřeno pro 2022 a 2018; druhý den vrací „žádné volby se nekonaly“). Pro 2014 a 2010 je to odvozeno z termínů voleb.
-# Rok 2026: kv2026 zatím vrací HTTP 404, přidá se sem, až bude k dispozici.
-DATES = {2022: "20220923", 2018: "20181005", 2014: "20141010", 2010: "20101015"}
-YEARS = tuple(DATES)
+# Starší ročníky: služba volby.cz bez parametru datumvoleb vrací jen „aktuální volby“ (naživo ověřeno: „V aktuálních volbách se v obci nevolí“),
+# správný je PRVNÍ den voleb (ověřeno 2022 a 2018; druhý den vrací „žádné volby se nekonaly“; 2014 a 2010 odvozeno z termínů voleb).
+OLD_DATES = {2022: "20220923", 2018: "20181005", 2014: "20141010", 2010: "20101015"}
+# Volby 2026 (9.–10. 10. 2026) mají jiné rozhraní: statické XML podle kódu zastupitelstva (dokumentace volby.gov.cz/opendata/kv2026).
+URLS = {2026: "https://volby.gov.cz/appdata/kv2026/20261009/odata/zastup/vysledky_obec_{kod}.xml",
+        **{y: f"https://www.volby.cz/pls/kv{y}/vysledky_obec?cislo_obce={{kod}}&datumvoleb={d}" for y, d in OLD_DATES.items()}}
+YEARS = tuple(URLS)
 SRC = "volby.cz (Český statistický úřad)"
 
 
@@ -68,14 +70,14 @@ def parse_result(stream):
     return {"registered": reg, "voted": voted, "valid": valid, "parties": list(parties.values())}
 
 
-def result_url(year, kod, datum):
-    return URL.format(year=year, kod=kod) + (f"&datumvoleb={datum}" if datum else "")
+def result_url(year, kod):
+    return URLS[year].format(kod=re.sub(r"\D", "", str(kod)))
 
 
 def _fetch(year, kod):
     """(rok, výsledek nebo None, důvod)."""
     try:
-        with net.open_stream(result_url(year, kod, DATES[year]), timeout=30) as r:
+        with net.open_stream(result_url(year, kod), timeout=30) as r:
             res = parse_result(r)
         return year, res, None if res else "v odpovědi chybí údaje o účasti"
     except net.ApiError as ex:
@@ -92,7 +94,7 @@ def election_card(kod):
              ("Dokumentace XML (KV2022)", "https://volby.gov.cz/opendata/kv2022/KV2022_XML.htm")]
     if not kod:
         return card(title, SRC, "error", None, "ARES nevrátil kód obce, výsledky voleb nelze dohledat.", links=links)
-    links.insert(1, ("XML výsledků této obce (2022)", result_url(2022, kod, DATES[2022])))
+    links.insert(1, ("XML výsledků této obce (2026)", result_url(2026, kod)))
     with ThreadPoolExecutor(max_workers=len(YEARS)) as ex:
         results = sorted(ex.map(lambda y: _fetch(y, kod), YEARS))
     data = [(y, d) for y, d, _ in results if d]
@@ -117,7 +119,7 @@ def election_card(kod):
                          [[p["name"], cell_right("–" if p["votes"] is None else thousands(p["votes"])),
                            cell_right("–" if p["mandates"] is None else str(p["mandates"]))] for p in parties[:15]])]
     notes = ["Nevolilo = zapsaní voliči minus odevzdané obálky. Zapsaní voliči jsou ti ve stálém seznamu v době voleb.",
-             "Účast je ověřena na živých datech volby.cz (2018, 2022); mandáty se čtou z atributů XML tolerantně. Volby 2026 zatím volby.cz v otevřených datech nenabízejí."]
+             "Účast je ověřena na živých datech volby.cz (2018, 2022); mandáty se čtou z atributů XML tolerantně."]
     if problems:
         notes.append("Nenačteno: " + "; ".join(problems))
     return card(title, SRC, "info", today_str(), f"Voleb do zastupitelstva obce v nabízených ročnících: {len(data)}.", blocks, links, notes)

@@ -151,14 +151,14 @@ CSV = ("hodnota,pohlavi_txt,vek_txt,rok,uzemi_kod,uzemi_txt\n" +
        "7,muži,0–14,2024,111111,Jinde\n"
        f",muži,0–14,2024,{KOD_OBCE},Ukázkov\n")  # prázdná hodnota se nesmí zobrazit
 
-VOLBY_DATA = {2018: "20181005", 2022: "20220923"}  # datumvoleb, pro které demo vrací výsledky (jinak chybové XML jako volby.cz)
+VOLBY_DATA = {2018: "20181005", 2022: "20220923", 2026: ""}  # datumvoleb starších ročníků (u 2026 se nepoužívá); jinak chybové XML jako volby.cz
 
 
 def _vysledky_obec(year, kod, datum=""):
     from . import net
     if year not in VOLBY_DATA:
         raise net.ApiError("HTTP 404", 404)
-    if kod != KOD_OBCE or datum != VOLBY_DATA[year]:
+    if year != 2026 and (kod != KOD_OBCE or datum != VOLBY_DATA[year]):
         return ('<?xml version="1.0" encoding="utf-8"?><VYSLEDKY_OBEC xmlns="http://www.volby.cz/kv/">'
                 '<CHYBA>V aktuálních volbách se v obci nevolí</CHYBA></VYSLEDKY_OBEC>').encode("utf-8")
     reg, voted = {2018: (1900, 1010), 2022: (1950, 1180), 2026: (2010, 1240)}[year]
@@ -173,6 +173,12 @@ def fake_stream(url):
     mv = re.search(r"/kv(\d{4})/vysledky_obec\?cislo_obce=(\d+)(?:&datumvoleb=(\d+))?", url)
     if mv:
         return io.BytesIO(_vysledky_obec(int(mv.group(1)), mv.group(2), mv.group(3) or ""))
+    m26 = re.search(r"/appdata/kv2026/20261009/odata/zastup/vysledky_obec_(\d+)\.xml", url)
+    if m26:  # nové rozhraní: pro obec, kde se nevolilo, soubor neexistuje (404)
+        if m26.group(1) != KOD_OBCE:
+            from . import net
+            raise net.ApiError("HTTP 404", 404)
+        return io.BytesIO(_vysledky_obec(2026, KOD_OBCE, ""))
     if "data.csu.gov.cz" in url:
         return io.BytesIO(CSV.encode("utf-8"))
     raise ValueError(f"demo: neznámý soubor {url}")

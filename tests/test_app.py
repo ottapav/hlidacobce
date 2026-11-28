@@ -78,11 +78,11 @@ class TestModules(Base):
         c = elections.election_card(demo.KOD_OBCE)
         self.assertEqual(c["status"], "info")
         chart = c["blocks"][0]
-        self.assertEqual((chart["type"], chart["stacked"], chart["categories"]), ("bars", True, ["2018", "2022"]))
+        self.assertEqual((chart["type"], chart["stacked"], chart["categories"]), ("bars", True, ["2018", "2022", "2026"]))
         voted, non = chart["series"][0]["values"], chart["series"][1]["values"]
-        self.assertEqual(voted, [1010, 1180])
-        self.assertEqual(non, [890, 770])  # zapsaní (1900, 1950) minus volilo
-        self.assertEqual([r[0] for r in c["blocks"][1]["rows"]], ["2018", "2022"])
+        self.assertEqual(voted, [1010, 1180, 1240])
+        self.assertEqual(non, [890, 770, 770])  # zapsaní (1900, 1950, 2010) minus volilo
+        self.assertEqual([r[0] for r in c["blocks"][1]["rows"]], ["2018", "2022", "2026"])
         self.assertEqual(c["blocks"][1]["rows"][1][4]["text"], "60.5 %")
         parties = c["blocks"][-1]["rows"]
         self.assertEqual(parties[0][0], "Sdružení nezávislých Ukázkov")
@@ -308,8 +308,9 @@ class TestResilience(Base):
     def test_elections_use_first_election_day(self):
         c = elections.election_card(demo.KOD_OBCE)
         self.assertEqual(c["status"], "info")
-        self.assertEqual([r[0] for r in c["blocks"][1]["rows"]], ["2018", "2022"])
-        self.assertIn("datumvoleb=20220923", elections.result_url(2022, "1", elections.DATES[2022]))
+        self.assertEqual([r[0] for r in c["blocks"][1]["rows"]], ["2018", "2022", "2026"])
+        self.assertIn("datumvoleb=20220923", elections.result_url(2022, "1"))
+        self.assertEqual(elections.result_url(2026, "533840"), "https://volby.gov.cz/appdata/kv2026/20261009/odata/zastup/vysledky_obec_533840.xml")
 
     def test_elections_server_error_text(self):
         c = elections.election_card("123456")

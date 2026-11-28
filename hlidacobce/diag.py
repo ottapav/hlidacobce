@@ -75,9 +75,9 @@ def _page_steps(ico):
 
 
 def _volby(kod):
-    def one(year, datum):
+    def one(year):
         def run():
-            with net.open_stream(elections.result_url(year, kod, datum), timeout=30) as r:
+            with net.open_stream(elections.result_url(year, kod), timeout=30) as r:
                 raw = r.read(60000)
             out = {"bytes_read": len(raw), "has_ZAPSANI_VOLICI": b"ZAPSANI_VOLICI" in raw}
             try:
@@ -89,8 +89,8 @@ def _volby(kod):
             tail = raw[raw.find(b"<VOLEBNI_STRANA"):][:600] if b"<VOLEBNI_STRANA" in raw else b""
             out["party_xml_sample"] = " ".join(tail.decode("utf-8", "replace").split())
             return out
-        return _step(f"volby.cz {year} datumvoleb={datum or '-'}", run)
-    return [one(y, d) for y, d in elections.DATES.items()]
+        return _step(f"volby {year}", run)
+    return [one(y) for y in elections.YEARS]
 
 
 def _csu(kod):
