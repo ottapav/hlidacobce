@@ -155,7 +155,7 @@ def _csi():
         f = parse_html(html).forms[0]
         data = {}
         for x in f["fields"]:
-            if x["name"] and x["tag"] == "input" and x["type"] in ("hidden", "text") and x["name"] not in data:
+            if x["name"] and x["tag"] == "input" and x["type"] in ("hidden", "text") and not x["name"].startswith("Answer_") and x["name"] not in data:
                 data[x["name"]] = x["value"]
         data.update({"a03City": "Velký Osek", "a17UIVCode": "A", "PouzeSkolySVyplnenymProfilem": "false"})
         url = urllib.parse.urljoin(CSI_PORTAL + "Search/School", f["action"])
@@ -163,7 +163,7 @@ def _csi():
         p2 = parse_html(html2)
         profile_links = [(h, t) for h, t in p2.links if re.search(r"/School/\d+", h or "", re.I)]
         out = {"posted_fields": {k: v for k, v in data.items() if v}, "final_url": final2, "html_chars": len(html2), "title": p2.title,
-               "text_start": " ".join(p2.parts)[:900], "profile_links": [f"{h} | {t[:60]}" for h, t in profile_links[:15]]}
+               "text_start": " ".join(p2.parts)[:900], "raw_html": html2[:1500], "profile_links": [f"{h} | {t[:60]}" for h, t in profile_links[:15]]}
         if profile_links:
             _, ph = net.fetch_page(urllib.parse.urljoin(final2, profile_links[0][0]))
             pp = parse_html(ph)
