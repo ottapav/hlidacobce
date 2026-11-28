@@ -150,27 +150,35 @@ def _csi():
             for p_ in [p] for f in p_.forms]}
 
     def search():
-        """Odešle formulář vyhledávání (POST) s obcí a druhem zařízení „Mateřské školy“; hodnoty ostatních polí převezme z formuláře."""
-        final, html = net.fetch_page(CSI_PORTAL + "Search/School")
+        """Zkusí vyhledání škol ve více variantách (číslo stránky, totalFound) podle obce a podle IČO, ať je jasné, co vrátí řádky tabulky."""
+        _, html = net.fetch_page(CSI_PORTAL + "Search/School")
         f = parse_html(html).forms[0]
-        data = {}
-        for x in f["fields"]:
-            if x["name"] and x["tag"] == "input" and x["type"] in ("hidden", "text") and not x["name"].startswith("Answer_") and x["name"] not in data:
-                data[x["name"]] = x["value"]
-        data.update({"a03City": "Velký Osek", "a17UIVCode": "A", "PouzeSkolySVyplnenymProfilem": "false"})
+        base = {x["name"]: x["value"] for x in f["fields"] if x["name"] and x["tag"] == "input" and x["type"] == "hidden"
+                and not x["name"].startswith("Answer_") and x["name"] not in ("Lat", "Lng", "PouzeSkolySVyplnenymProfilem")}
+        base["PouzeSkolySVyplnenymProfilem"] = "false"
         url = urllib.parse.urljoin(CSI_PORTAL + "Search/School", f["action"])
-        final2, html2 = net.fetch_page(url, form=data)
-        p2 = parse_html(html2)
-        profile_links = [(h, t) for h, t in p2.links if re.search(r"/School/\d+", h or "", re.I)]
-        out = {"posted_fields": {k: v for k, v in data.items() if v}, "final_url": final2, "html_chars": len(html2), "title": p2.title,
-               "text_start": " ".join(p2.parts)[:900], "raw_html": html2[:1500], "profile_links": [f"{h} | {t[:60]}" for h, t in profile_links[:15]]}
-        if profile_links:
-            _, ph = net.fetch_page(urllib.parse.urljoin(final2, profile_links[0][0]))
-            pp = parse_html(ph)
-            text = " ".join(pp.parts)
-            out["profile"] = {"url": profile_links[0][0], "title": pp.title, "html_chars": len(ph), "text": text[:1500],
-                              "external_links": [f"{h} | {t[:40]}" for h, t in pp.links if re.match(r"https?://", h or "", re.I) and "csicr.cz" not in h][:10],
-                              "emails_or_web": re.findall(r"[\w.-]+@[\w.-]+|www\.[\w./-]+", text)[:10]}
+        try:
+            ms_ico = next(e["ico"] for e in schools.schools_from_hlidac(DEFAULT_ICO) if "ms" in e["kinds"])
+        except (StopIteration, net.ApiError, ValueError):
+            ms_ico = ""
+        variants = {
+            "obec+MŠ, page=1": {"a03City": "Velký Osek", "a17UIVCode": "A", "page": "1"},
+            "obec+MŠ, page=1, totalFound=1": {"a03City": "Velký Osek", "a17UIVCode": "A", "page": "1", "totalFound": "1"},
+            "obec+MŠ, page=0, totalFound=1": {"a03City": "Velký Osek", "a17UIVCode": "A", "page": "0", "totalFound": "1"},
+            "obec bez druhu, page=1": {"a03City": "Velký Osek", "page": "1"},
+            "obec+ZŠ, page=1": {"a03City": "Velký Osek", "a17UIVCode": "B", "page": "1"},
+            f"IČO MŠ {ms_ico}, page=1": {"a03ICO": ms_ico, "page": "1"},
+        }
+        out = {}
+        for name, extra in variants.items():
+            try:
+                _, h = net.fetch_page(url, form={**base, **extra})
+                pp = parse_html(h)
+                links = [f"{hh} | {t[:60]}" for hh, t in pp.links if re.search(r"School", hh or "", re.I)]
+                out[name] = {"chars": len(h), "text": " ".join(pp.parts)[:300], "school_links": links[:5],
+                             "row_html": h[h.find("</tr>"):][:900] if "</tr>" in h else ""}
+            except (net.ApiError, ValueError) as ex:
+                out[name] = {"error": str(ex)}
         return out
 
     def profile():
