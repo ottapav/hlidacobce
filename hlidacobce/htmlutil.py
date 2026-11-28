@@ -7,6 +7,7 @@ class _Page(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.parts, self.links, self.title, self._skip, self._in_title, self._href, self._atxt = [], [], "", 0, False, None, []
         self.link_prev, self._prev = [], ""  # text těsně před každým odkazem (paralelně k self.links)
+        self.forms, self._select, self._option = [], None, None  # formuláře: [{action, method, fields:[{tag,name,id,type,value,options}]}]
 
     def handle_starttag(self, tag, attrs):
         if tag in ("script", "style", "noscript"):
@@ -16,12 +17,25 @@ class _Page(HTMLParser):
         elif tag == "a":
             self._href, self._atxt = dict(attrs).get("href"), []
             self._prev = self.parts[-1] if self.parts else ""
+        elif tag == "form":
+            a = dict(attrs)
+            self.forms.append({"action": a.get("action", ""), "method": (a.get("method") or "get").lower(), "fields": []})
+        elif tag in ("input", "select", "textarea") and self.forms:
+            a = dict(attrs)
+            field = {"tag": tag, "name": a.get("name", ""), "id": a.get("id", ""), "type": a.get("type", ""), "value": a.get("value", ""), "options": []}
+            self.forms[-1]["fields"].append(field)
+            self._select = field if tag == "select" else self._select
+        elif tag == "option" and self._select is not None:
+            self._option = [dict(attrs).get("value", ""), ""]
+            self._select["options"].append(self._option)
 
     def handle_endtag(self, tag):
         if tag in ("script", "style", "noscript") and self._skip:
             self._skip -= 1
         elif tag == "title":
             self._in_title = False
+        elif tag == "select":
+            self._select = self._option = None
         elif tag == "a" and self._href is not None:
             self.links.append((self._href, " ".join(self._atxt).strip()))
             self.link_prev.append(self._prev)
@@ -32,6 +46,8 @@ class _Page(HTMLParser):
             return
         if self._in_title:
             self.title += data
+        if self._option is not None:
+            self._option[1] += data.strip()
         s = data.strip()
         if s:
             self.parts.append(s)

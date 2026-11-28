@@ -391,7 +391,7 @@ class TestDiag(Base):
 class TestDiagCsi(Base):
     def test_csi_probe_does_not_crash(self):
         d = diag.selftest(only="csi")  # v demo režimu zdroj není, kroky selžou řízeně
-        self.assertEqual(d["ok"] + d["failed"], 3)
+        self.assertEqual(d["ok"] + d["failed"], 5)
 
 
 class TestServer(Base):

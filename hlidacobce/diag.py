@@ -6,6 +6,7 @@ Spouští se ručně na /api/selftest; nic neběží periodicky.
 import io
 import re
 import time
+import urllib.parse
 from datetime import date, timedelta
 
 from . import ares, contracts, csu, elections, funding, hlidac, net, schools, webcheck
@@ -152,7 +153,39 @@ def _csi():
         return {"profile_url": m.group(0), "final_url": final, "title": p.title, "html_chars": len(html), "external_links": ext[:15],
                 "emails_or_web_in_text": re.findall(r"[\w.-]+@[\w.-]+|www\.[\w./-]+", text)[:10], "text_start": text[:700],
                 "links": [f"{h} | {t[:40]}" for h, t in p.links[:30]]}
-    return [_step("ČŠI: úvodní stránka InspIS PORTÁLu", portal), _step("ČŠI: otevřená data – začátek CSV inspekčních zpráv", csv_head),
+    def form():
+        final, html = net.fetch_page(CSI_PORTAL + "Search/School")
+        p = parse_html(html)
+        return {"final_url": final, "title": p.title, "forms": [
+            {"action": f["action"], "method": f["method"],
+             "fields": [{"tag": x["tag"], "name": x["name"], "id": x["id"], "type": x["type"], "value": x["value"][:40],
+                         "options": [f"{v}={t}" for v, t in x["options"][:25]]} for x in f["fields"] if x["type"] != "submit" or x["name"]]}
+            for p_ in [p] for f in p_.forms]}
+
+    def search():
+        """Zkusí GET vyhledání podle polí, která formulář sám uvádí (Obec + Druh školy). Když je formulář POST, jen to oznámí."""
+        final, html = net.fetch_page(CSI_PORTAL + "Search/School")
+        forms = [f for f in parse_html(html).forms if any("obec" in (x["name"] + x["id"]).lower() for x in f["fields"])]
+        if not forms:
+            return {"error": "formulář s polem Obec nenalezen"}
+        f = forms[0]
+        if f["method"] != "get":
+            return {"method": f["method"], "action": f["action"], "hidden": [x["name"] for x in f["fields"] if x["type"] == "hidden"]}
+        params = {x["name"]: x["value"] for x in f["fields"] if x["name"] and x["tag"] == "input" and x["type"] in ("hidden", "")}
+        for x in f["fields"]:
+            low = (x["name"] + x["id"]).lower()
+            if "obec" in low and x["tag"] == "input":
+                params[x["name"]] = "Velký Osek"
+            if x["tag"] == "select" and ("druh" in low or "typ" in low and "zrizovatel" not in low):
+                opt = next((v for v, t in x["options"] if "Mateřské" in t), None)
+                if opt:
+                    params[x["name"]] = opt
+        url = urllib.parse.urljoin(CSI_PORTAL + "Search/School", f["action"] or "") + "?" + urllib.parse.urlencode(params)
+        final2, html2 = net.fetch_page(url)
+        p2 = parse_html(html2)
+        return {"request": url, "title": p2.title, "html_chars": len(html2), "text_start": " ".join(p2.parts)[:600],
+                "links": [f"{h} | {t[:50]}" for h, t in p2.links if re.search(r"school|skola|detail|profil", h or "", re.I)][:20]}
+    return [_step("ČŠI: úvodní stránka InspIS PORTÁLu", portal), _step("ČŠI: formulář vyhledávání škol", form), _step("ČŠI: zkušební vyhledání (Velký Osek, MŠ)", search), _step("ČŠI: otevřená data – začátek CSV inspekčních zpráv", csv_head),
             _step("ČŠI: profil školy z PortalLink", profile)]
 
 
